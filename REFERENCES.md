@@ -14,12 +14,15 @@
 
 ---
 
-## 2. 視覺與圖形素材 (Visual Assets)
+## 2. 視覺與圖形素材 (Visual & 3D Assets)
 
 | 資產名稱 | 類型 | 授權協議 | 作者 / 出處 | 備註 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Procedural Vector Sprites** | 角色俯視圖形 | MIT / CC0 (自繪) | 專案內建代碼生成 | 使用 Canvas Path 程序化繪製，零額外圖檔載入 |
-| **Minimalist Icons** | UI 圖示 (技能/指示) | CC0 / MIT (自製/開源) | 待收錄 | 優先使用輕量 SVG 或幾何程序繪製 |
+| **LowPoly_Farm_02.blend** | 3D Low-Poly 農莊村莊模型庫 (本機萃取) | 使用者授權素材 (CC / Royalty-Free) | `c:\Users\reyliou\Downloads\LowPoly_Farm_02.blend` | 透過 Blender 5.2 背景導出為 `house_01.glb`, `bonfire.glb`, `wheat_crop.glb`, `bench.glb`, `tree_01.glb` 等 |
+| **Kenney Fantasy Town Kit** | 3D Low-Poly 模組化村莊與小屋 (glTF/GLB) | CC0 1.0 Universal (Public Domain) | Kenney (https://kenney.nl/assets/fantasy-town-kit) | 160+ 個中世紀房屋、屋頂、門窗、農作物與圍欄 |
+| **Quaternius Medieval Village MegaKit** | 3D Low-Poly 村莊室內外建築 (glTF/FBX) | CC0 1.0 Universal (Public Domain) | Quaternius (https://quaternius.itch.io/medieval-village-megakit) | 300+ 模組化建築物件，支援室內外無縫穿透 |
+| **KayKit Medieval Hexagon & Village** | 3D Low-Poly 中世紀道具與自然景觀 | CC0 1.0 Universal (Public Domain) | Kay Lousberg (https://kaylousberg.itch.io) | 樹木、營火、木箱、木桶與小麥 |
+| **Procedural Vector Sprites** | 角色俯視圖形 (2D 備援) | MIT / CC0 (自繪) | 專案內建代碼生成 | 使用 Canvas Path 程序化繪製 |
 
 ---
 
