@@ -473,14 +473,16 @@ export class ThreeVillageRenderer {
    */
   private async loadAllGLBModels(): Promise<void> {
     const modelPaths: Record<string, string> = {
-      // 4 種不同風格的村民木屋與職業專屬建築
+      // 4 種不同風格的村民木屋與高細節可走入式分層木屋 (Walls_Static / Walls_Front / Door_Panel / Roof_Cutaway)
       house1: '/assets/models/house_01.glb',
       house2: '/assets/models/house_02.glb',
       house3: '/assets/models/house_03.glb',
       house4: '/assets/models/house_04.glb',
+      cottage_a: '/assets/models/cottage_walkin_a.glb',
+      cottage_b: '/assets/models/cottage_walkin_b.glb',
       barn: '/assets/models/barn.glb',
       watchtower: '/assets/models/watchtower.glb',
-      // 村莊設施與農具
+      // 村莊設施與室內精細家具農具 (已修正世界座標正立軸向)
       bonfire: '/assets/models/bonfire.glb',
       wheat: '/assets/models/wheat_crop.glb',
       bench: '/assets/models/bench.glb',
@@ -490,6 +492,9 @@ export class ThreeVillageRenderer {
       streetlight: '/assets/models/streetlight.glb',
       table: '/assets/models/table.glb',
       chair: '/assets/models/chair.glb',
+      stool: '/assets/models/stool.glb',
+      fooddish: '/assets/models/fooddish.glb',
+      bucket: '/assets/models/bucket.glb',
       // 樹木森林 (已移除 LOD1 重疊破圖並內嵌完整貼圖)
       tree1: '/assets/models/nature/tree_01.glb',
       tree2: '/assets/models/nature/tree_02.glb',
@@ -586,7 +591,9 @@ export class ThreeVillageRenderer {
       const bx = Math.cos(angle) * dist;
       const bz = Math.sin(angle) * dist;
       const by = this.getTerrainHeight(bx, bz);
-      this.spawnModel('bench', bx, by, bz, 2.2, -angle + Math.PI / 2);
+      // 椅背朝外 (-Z)、座面正對中央營火 (0, 0)：使用 Math.atan2(-bx, -bz) 確保 6 張靠背長椅 100% 面向火堆
+      const faceCenterRotY = Math.atan2(-bx, -bz);
+      this.spawnModel('bench', bx, by, bz, 1.85, faceCenterRotY);
     }
 
     // 廣場四周立起 4 座中古世紀鐵藝街燈
@@ -757,10 +764,11 @@ export class ThreeVillageRenderer {
   }
 
   /**
-   * 建造可實際走入的中世紀 3D 實體木屋：
-   * - 四面厚實牆體與大門開口完全對齊 map-data.ts 的碰撞箱 (15.4m x 13.2m)
-   * - 內建溫潤橡木地板、可開關鎖栓的 3D 實木大門、壁爐暖光、木床、編織地毯、餐桌椅與 6 大職業專屬擺設
-   * - 屋頂獨立成組 (roofGroup)：第三人稱進屋自動掀開屋頂俯視內裝；第一人稱進屋保留屋頂與樑柱！
+   * 建造可實際走入的高細節 Low-Poly 中世紀 3D 實體木屋：
+   * - 採用 Blender 5.2 從 LowPoly_Farm_02.blend 拆解鏤空的 6,000~8,500 面手工木屋模型 (cottage_walkin_a / cottage_walkin_b)
+   *   保留完整立體屋頂瓦片、木骨立柱、水平企口木板牆、多格發光木窗、石砌台階與煙囪，並完全對齊 map-data.ts 碰撞箱 (15.4m x 13.2m)
+   * - 內建精細中世紀室內裝潢：四柱雕花木床、石造拱形壁爐與鐵釜吊鍋、三層藏書煉金架、餐桌烤肉拼盤、正立且精準面向餐桌的實木椅與木凳
+   * - 屋頂獨立成組 (roofGroup)：第三人稱進屋自動掀開屋頂俯視內裝；第一人稱進屋保留完整屋頂與樑柱！
    */
   private buildWalkInCottage(
     id: string,
@@ -778,296 +786,457 @@ export class ThreeVillageRenderer {
     const W = 15.4;          // 對應 2D 寬 140 * 0.11
     const D = 13.2;          // 對應 2D 深 120 * 0.11
     const wallT = 1.1;       // 對應 2D 牆厚 10 * 0.11
-    const wallH = 4.2;       // 牆壁高度
-    const sideDoorW = 4.62;  // 對應 2D 門側牆 42 * 0.11 (中間留出 6.16m 寬敞門口)
+    const wallH = 3.55;      // 一樓牆體切齊高度
     const dirZ = isNorthRow ? 1 : -1; // 北排大門朝 +Z (南)，南排大門朝 -Z (北)
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: '#f3e5ab', roughness: 0.88 });
-    const frontWallMat = new THREE.MeshStandardMaterial({ color: '#f3e5ab', roughness: 0.88 });
-    const timberMat = new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 });
-    const frontTimberMat = new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 });
-    const floorMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.82 });
+    const timberMat = new THREE.MeshStandardMaterial({ color: '#3b1704', roughness: 0.85 });
+    const floorMat = new THREE.MeshStandardMaterial({ color: '#6b3410', roughness: 0.80 });
+    const plankGrooveMat = new THREE.MeshStandardMaterial({ color: '#3f1d06', roughness: 0.90 });
     const stoneMat = new THREE.MeshStandardMaterial({ color: '#57534e', roughness: 0.92 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: roofHex, roughness: 0.8, side: THREE.DoubleSide });
+    const darkStoneMat = new THREE.MeshStandardMaterial({ color: '#292524', roughness: 0.95 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.35, metalness: 0.8 });
+    const brassMat = new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.3, metalness: 0.85 });
 
-    // 1. 室內溫潤橡木地板與中央編織地毯
-    const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(W - 0.4, 0.14, D - 0.4), floorMat);
-    floorMesh.position.y = 0.07;
+    // 1. 室內立體企口橡木地板與多層次中世紀編織流蘇地毯
+    const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(W - 0.8, 0.16, D - 0.8), floorMat);
+    floorMesh.position.y = 0.08;
     floorMesh.receiveShadow = true;
     group.add(floorMesh);
 
+    // 室內木地板立體拼接縫隙線條
+    for (let pz = -5.2; pz <= 5.2; pz += 1.3) {
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(W - 1.2, 0.02, 0.05), plankGrooveMat);
+      seam.position.set(0, 0.165, pz);
+      seam.receiveShadow = true;
+      group.add(seam);
+    }
+
+    const rugFringe = new THREE.Mesh(
+      new THREE.BoxGeometry(7.2, 0.03, 5.4),
+      new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.95 })
+    );
+    rugFringe.position.set(0, 0.165, dirZ * 0.45);
+    rugFringe.receiveShadow = true;
+    group.add(rugFringe);
+
     const rugBorder = new THREE.Mesh(
-      new THREE.BoxGeometry(6.8, 0.04, 5.2),
+      new THREE.BoxGeometry(6.8, 0.04, 5.1),
       new THREE.MeshStandardMaterial({ color: '#d97706', roughness: 0.9 })
     );
-    rugBorder.position.set(0, 0.15, dirZ * 0.4);
+    rugBorder.position.set(0, 0.175, dirZ * 0.45);
     rugBorder.receiveShadow = true;
     group.add(rugBorder);
 
     const rugInner = new THREE.Mesh(
-      new THREE.BoxGeometry(6.2, 0.05, 4.6),
+      new THREE.BoxGeometry(6.1, 0.05, 4.4),
       new THREE.MeshStandardMaterial({ color: rugHex, roughness: 0.92 })
     );
-    rugInner.position.set(0, 0.16, dirZ * 0.4);
+    rugInner.position.set(0, 0.185, dirZ * 0.45);
     rugInner.receiveShadow = true;
     group.add(rugInner);
 
-    // 2. 後牆、左右側牆與木骨橫樑 (完全貼合 map-data.ts 外牆碰撞箱)
-    const backWallZ = -dirZ * (D / 2 - wallT / 2);
+    // 2. 載入高細節 Low-Poly 木屋分層結構 (cottage_a: 單層廊柱木屋 / cottage_b: 雙層山牆莊園木屋)
     const frontWallZ = dirZ * (D / 2 - wallT / 2);
-    const leftWallX = -(W / 2 - wallT / 2);
-    const rightWallX = W / 2 - wallT / 2;
-
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, wallH, wallT), wallMat);
-    backWall.position.set(0, wallH / 2, backWallZ);
-    backWall.castShadow = true;
-    backWall.receiveShadow = true;
-    group.add(backWall);
-
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, D), wallMat);
-    leftWall.position.set(leftWallX, wallH / 2, 0);
-    leftWall.castShadow = true;
-    leftWall.receiveShadow = true;
-    group.add(leftWall);
-
-    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, D), wallMat);
-    rightWall.position.set(rightWallX, wallH / 2, 0);
-    rightWall.castShadow = true;
-    rightWall.receiveShadow = true;
-    group.add(rightWall);
-
-    // 四角深胡桃木立柱與橫樑
-    for (const px of [-W / 2 + 0.35, W / 2 - 0.35]) {
-      for (const pz of [-D / 2 + 0.35, D / 2 - 0.35]) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.75, wallH + 0.2, 0.75), timberMat);
-        post.position.set(px, wallH / 2, pz);
-        post.castShadow = true;
-        group.add(post);
-      }
-    }
-
-    // 東西兩側暖光窗戶
-    const winMat = new THREE.MeshStandardMaterial({
-      color: '#fef08a',
-      emissive: '#f59e0b',
-      emissiveIntensity: 0.9,
-      roughness: 0.2
-    });
-    for (const wx of [leftWallX, rightWallX]) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.14, 1.4, 2.2), winMat);
-      win.position.set(wx, 2.3, 0);
-      group.add(win);
-    }
-
-    // 3. 前牆組與可開關 3D 實木大門 (frontWallGroup)
+    const doorHalfGap = 2.42; // 對應 GLB 門框開口 X in [-2.42, +2.42]
     const frontWallGroup = new THREE.Group();
-    const frontLeft = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW, wallH, wallT), frontWallMat);
-    frontLeft.position.set(-(W / 2 - sideDoorW / 2), wallH / 2, frontWallZ);
-    frontLeft.castShadow = true;
-    frontLeft.receiveShadow = true;
-    frontWallGroup.add(frontLeft);
-
-    const frontRight = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW, wallH, wallT), frontWallMat);
-    frontRight.position.set(W / 2 - sideDoorW / 2, wallH / 2, frontWallZ);
-    frontRight.castShadow = true;
-    frontRight.receiveShadow = true;
-    frontWallGroup.add(frontRight);
-
-    // 門楣橫樑
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(W, 0.75, wallT + 0.12), frontTimberMat);
-    lintel.position.set(0, wallH - 0.35, frontWallZ);
-    lintel.castShadow = true;
-    frontWallGroup.add(lintel);
-
-    // 門框立柱
-    const doorHalfGap = (W - sideDoorW * 2) / 2; // 3.08m
-    for (const dx of [-doorHalfGap, doorHalfGap]) {
-      const framePost = new THREE.Mesh(new THREE.BoxGeometry(0.45, wallH, wallT + 0.16), frontTimberMat);
-      framePost.position.set(dx, wallH / 2, frontWallZ);
-      frontWallGroup.add(framePost);
-    }
-
-    // 可旋轉 3D 橡木門扇 (軸心設於左側門框)
+    const roofGroup = new THREE.Group();
     const doorPivot = new THREE.Group();
-    doorPivot.position.set(-doorHalfGap + 0.2, 0.15, frontWallZ);
+    doorPivot.position.set(-doorHalfGap, 0.18, frontWallZ);
 
-    const doorWidth = doorHalfGap * 2 - 0.4;
-    const doorHeight = wallH - 0.85;
-    const doorPanel = new THREE.Mesh(
-      new THREE.BoxGeometry(doorWidth, doorHeight, 0.28),
-      new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.8 })
-    );
-    doorPanel.position.set(doorWidth / 2, doorHeight / 2, 0);
-    doorPanel.castShadow = true;
-    doorPivot.add(doorPanel);
+    const useStyleB = id === 'cottage-2' || id === 'cottage-4' || id === 'cottage-6';
+    const cottageProto = this.modelPrototypes.get(useStyleB ? 'cottage_b' : 'cottage_a');
+    const archRotY = isNorthRow ? 0 : Math.PI;
+
+    if (cottageProto) {
+      const archClone = cottageProto.clone(true);
+
+      let wallsStaticObj: THREE.Object3D | null = null;
+      let wallsFrontObj: THREE.Object3D | null = null;
+      let doorPanelObj: THREE.Object3D | null = null;
+      let roofCutawayObj: THREE.Object3D | null = null;
+
+      archClone.traverse((child) => {
+        if (child.name.startsWith('Walls_Static')) wallsStaticObj = child;
+        else if (child.name.startsWith('Walls_Front')) wallsFrontObj = child;
+        else if (child.name.startsWith('Door_Panel')) doorPanelObj = child;
+        else if (child.name.startsWith('Roof_Cutaway')) roofCutawayObj = child;
+      });
+
+      // 替每個部位獨立複製材質，讓每棟木屋擁有專屬屋頂瓦片色澤且半透明化互不干擾
+      const cloneAndTintMaterials = (rootObj: THREE.Object3D, tintRoof: boolean) => {
+        rootObj.traverse((node) => {
+          if ((node as THREE.Mesh).isMesh) {
+            const mesh = node as THREE.Mesh;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            const cloneMat = (m: THREE.Material): THREE.Material => {
+              const cm = m.clone() as THREE.MeshStandardMaterial;
+              cm.side = THREE.DoubleSide;
+              if (tintRoof && cm.name && cm.name.includes('Roof_Main')) {
+                cm.color.set(roofHex);
+              }
+              return cm;
+            };
+            if (Array.isArray(mesh.material)) {
+              mesh.material = mesh.material.map(cloneMat);
+            } else if (mesh.material) {
+              mesh.material = cloneMat(mesh.material);
+            }
+          }
+        });
+      };
+
+      if (wallsStaticObj) {
+        const ws = wallsStaticObj as THREE.Object3D;
+        cloneAndTintMaterials(ws, false);
+        ws.rotation.y = archRotY;
+        group.add(ws);
+      }
+
+      if (wallsFrontObj) {
+        const wf = wallsFrontObj as THREE.Object3D;
+        cloneAndTintMaterials(wf, false);
+        wf.rotation.y = archRotY;
+        frontWallGroup.add(wf);
+      }
+
+      if (doorPanelObj) {
+        const dp = doorPanelObj as THREE.Object3D;
+        cloneAndTintMaterials(dp, false);
+        dp.position.set(0, 0, 0);
+        doorPivot.add(dp);
+      }
+
+      if (roofCutawayObj) {
+        const rc = roofCutawayObj as THREE.Object3D;
+        cloneAndTintMaterials(rc, true);
+        rc.rotation.y = archRotY;
+        roofGroup.add(rc);
+      }
+    } else {
+      // 備援幾何牆體与門板 (當 GLB 尚未完成載入時)
+      const fallbackMat = new THREE.MeshStandardMaterial({ color: '#f3e5ab', roughness: 0.88 });
+      const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, wallH, wallT), fallbackMat);
+      backWall.position.set(0, wallH / 2, -frontWallZ);
+      group.add(backWall);
+
+      const fallbackDoor = new THREE.Mesh(
+        new THREE.BoxGeometry(doorHalfGap * 2, 2.9, 0.24),
+        new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.8 })
+      );
+      fallbackDoor.position.set(doorHalfGap, 1.45, 0);
+      doorPivot.add(fallbackDoor);
+    }
 
     // 門鎖橫栓 (反鎖時顯現發光紅鐵橫槓)
+    const doorWidth = doorHalfGap * 2;
     const lockBar = new THREE.Mesh(
-      new THREE.BoxGeometry(doorWidth + 0.6, 0.26, 0.42),
+      new THREE.BoxGeometry(doorWidth + 0.5, 0.24, 0.42),
       new THREE.MeshStandardMaterial({
         color: '#ef4444',
         emissive: '#dc2626',
-        emissiveIntensity: 1.4,
+        emissiveIntensity: 1.5,
         metalness: 0.7,
         roughness: 0.3
       })
     );
-    lockBar.position.set(doorWidth / 2, doorHeight * 0.52, 0);
+    lockBar.position.set(doorWidth / 2, 1.5, 0);
     lockBar.visible = false;
     doorPivot.add(lockBar);
 
     frontWallGroup.add(doorPivot);
     group.add(frontWallGroup);
+    group.add(roofGroup);
 
-    // 4. 室內三大核心家具區 (100% 對應 map-data.ts 的室內家具碰撞箱座標！)
+    // 3. 室內三大核心高細節家具區 (100% 對應 map-data.ts 的室內家具碰撞箱座標！)
     const backFurnZ = -dirZ * 4.1;
 
-    // (A) 左後角：中世紀實木床鋪與枕頭毛毯 (對應 x + 12..46 => 本地 X = -4.5m)
+    // =========================================================================
+    // (A) 左後角：精細 Low-Poly 中世紀四柱雕花木床與床頭燭台 (本地 X = -4.5m)
+    // =========================================================================
     const bedGroup = new THREE.Group();
-    bedGroup.position.set(-4.5, 0.15, backFurnZ);
-    const bedFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4, 0.55, 2.6),
-      new THREE.MeshStandardMaterial({ color: '#5c3a21', roughness: 0.85 })
-    );
-    bedFrame.position.y = 0.28;
-    bedFrame.castShadow = true;
-    bedGroup.add(bedFrame);
+    bedGroup.position.set(-4.5, 0.16, backFurnZ);
 
-    const headboard = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4, 1.45, 0.32),
-      new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 })
-    );
-    headboard.position.set(0, 0.72, -dirZ * 1.15);
+    const bedOakMat = new THREE.MeshStandardMaterial({ color: '#5c3a21', roughness: 0.82 });
+    const bedWalnutMat = new THREE.MeshStandardMaterial({ color: '#3b1704', roughness: 0.85 });
+    const linenMat = new THREE.MeshStandardMaterial({ color: '#fef9c3', roughness: 0.85 });
+    const quiltMat = new THREE.MeshStandardMaterial({ color: rugHex, roughness: 0.88 });
+
+    // 床架底座與側裙板
+    const bedBase = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.42, 2.5), bedOakMat);
+    bedBase.position.y = 0.28;
+    bedBase.castShadow = true;
+    bedGroup.add(bedBase);
+
+    // 四根胡桃木雕花立柱與黃銅柱頭飾球
+    for (const px of [-1.58, 1.58]) {
+      for (const pz of [-1.18, 1.18]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.75, 0.22), bedWalnutMat);
+        post.position.set(px, 0.88, pz);
+        post.castShadow = true;
+        bedGroup.add(post);
+
+        const finial = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), brassMat);
+        finial.position.set(px, 1.82, pz);
+        bedGroup.add(finial);
+      }
+    }
+
+    // 雕花分格床頭板 (Headboard) 與床尾板 (Footboard)
+    const headboard = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.25, 0.22), bedWalnutMat);
+    headboard.position.set(0, 0.85, -dirZ * 1.16);
+    headboard.castShadow = true;
     bedGroup.add(headboard);
 
-    const blanket = new THREE.Mesh(
-      new THREE.BoxGeometry(3.15, 0.25, 1.85),
-      new THREE.MeshStandardMaterial({ color: rugHex, roughness: 0.9 })
-    );
-    blanket.position.set(0, 0.62, dirZ * 0.25);
+    const headCrown = new THREE.Mesh(new THREE.BoxGeometry(3.45, 0.16, 0.30), bedOakMat);
+    headCrown.position.set(0, 1.52, -dirZ * 1.16);
+    bedGroup.add(headCrown);
+
+    const footboard = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.72, 0.20), bedWalnutMat);
+    footboard.position.set(0, 0.58, dirZ * 1.16);
+    footboard.castShadow = true;
+    bedGroup.add(footboard);
+
+    // 亞麻床墊、雙層反折毛毯與兩顆蓬鬆枕頭
+    const mattress = new THREE.Mesh(new THREE.BoxGeometry(3.05, 0.26, 2.25), linenMat);
+    mattress.position.set(0, 0.56, 0);
+    bedGroup.add(mattress);
+
+    const blanket = new THREE.Mesh(new THREE.BoxGeometry(3.12, 0.24, 1.55), quiltMat);
+    blanket.position.set(0, 0.64, dirZ * 0.34);
+    blanket.castShadow = true;
     bedGroup.add(blanket);
 
-    const pillow = new THREE.Mesh(
-      new THREE.BoxGeometry(2.4, 0.22, 0.62),
-      new THREE.MeshStandardMaterial({ color: '#fef9c3', roughness: 0.85 })
-    );
-    pillow.position.set(0, 0.66, -dirZ * 0.78);
-    bedGroup.add(pillow);
+    const blanketFold = new THREE.Mesh(new THREE.BoxGeometry(3.14, 0.26, 0.28), linenMat);
+    blanketFold.position.set(0, 0.65, -dirZ * 0.36);
+    bedGroup.add(blanketFold);
+
+    for (const px of [-0.75, 0.75]) {
+      const pillow = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.20, 0.56), linenMat);
+      pillow.position.set(px, 0.74, -dirZ * 0.78);
+      pillow.rotation.x = dirZ * 0.18;
+      bedGroup.add(pillow);
+    }
     group.add(bedGroup);
 
-    // (B) 後牆中央：石砌壁爐、餘燼火光與室內暖光源 (對應 x + 56..84 => 本地 X = 0.0m)
+    // =========================================================================
+    // (B) 後牆中央：精細石造拱形壁爐、胡桃木壁爐架、吊掛鐵釜鍋與溫暖火光 (本地 X = 0.0m)
+    // =========================================================================
     const hearthGroup = new THREE.Group();
-    hearthGroup.position.set(0, 0.15, -dirZ * 4.85);
-    const hearthBody = new THREE.Mesh(new THREE.BoxGeometry(3.0, 3.6, 1.7), stoneMat);
-    hearthBody.position.y = 1.8;
-    hearthBody.castShadow = true;
-    hearthGroup.add(hearthBody);
+    hearthGroup.position.set(0, 0.16, -dirZ * 4.85);
+
+    // 寬厚石砌爐台底座
+    const hearthSlab = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.24, 2.1), stoneMat);
+    hearthSlab.position.set(0, 0.12, dirZ * 0.15);
+    hearthSlab.receiveShadow = true;
+    hearthGroup.add(hearthSlab);
+
+    // 壁爐左右石柱、深色內爐膛與上方漸縮石煙道
+    const hearthBack = new THREE.Mesh(new THREE.BoxGeometry(3.1, 2.2, 0.55), darkStoneMat);
+    hearthBack.position.set(0, 1.2, -dirZ * 0.55);
+    hearthBack.castShadow = true;
+    hearthGroup.add(hearthBack);
+
+    for (const hx of [-1.15, 1.15]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.82, 2.1, 1.55), stoneMat);
+      pillar.position.set(hx, 1.15, 0);
+      pillar.castShadow = true;
+      hearthGroup.add(pillar);
+    }
+
+    const hearthArch = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.52, 1.62), stoneMat);
+    hearthArch.position.set(0, 2.05, 0);
+    hearthArch.castShadow = true;
+    hearthGroup.add(hearthArch);
+
+    // 厚實胡桃木壁爐台架 (Mantelpiece) 與上方銅燭台擺飾
+    const mantelpiece = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.22, 1.85), timberMat);
+    mantelpiece.position.set(0, 2.38, dirZ * 0.06);
+    mantelpiece.castShadow = true;
+    hearthGroup.add(mantelpiece);
+
+    const chimneyHood = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.25, 1.35), stoneMat);
+    chimneyHood.position.set(0, 3.05, -dirZ * 0.12);
+    chimneyHood.castShadow = true;
+    hearthGroup.add(chimneyHood);
+
+    // 爐膛內交錯燃燒圓木、熾熱餘燼與鑄鐵燉鍋 (Cauldron)
+    for (const rotZ of [-0.35, 0.35]) {
+      const logMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 1.25, 7), timberMat);
+      logMesh.rotation.z = Math.PI / 2;
+      logMesh.rotation.y = rotZ;
+      logMesh.position.set(0, 0.38, dirZ * 0.15);
+      hearthGroup.add(logMesh);
+    }
 
     const fireCore = new THREE.Mesh(
-      new THREE.BoxGeometry(1.5, 0.9, 0.5),
+      new THREE.DodecahedronGeometry(0.48, 0),
       new THREE.MeshStandardMaterial({
         color: '#f97316',
         emissive: '#ea580c',
-        emissiveIntensity: 2.2
+        emissiveIntensity: 2.5,
+        roughness: 0.4
       })
     );
-    fireCore.position.set(0, 0.65, dirZ * 0.7);
+    fireCore.scale.set(1.4, 0.9, 0.8);
+    fireCore.position.set(0, 0.58, dirZ * 0.18);
     hearthGroup.add(fireCore);
 
-    const indoorLight = new THREE.PointLight('#ff9e44', 1.65, 16, 1.4);
-    indoorLight.position.set(0, 2.6, dirZ * 1.5);
+    const cauldron = new THREE.Mesh(new THREE.SphereGeometry(0.38, 10, 8), ironMat);
+    cauldron.position.set(0, 0.92, dirZ * 0.22);
+    hearthGroup.add(cauldron);
+
+    const indoorLight = new THREE.PointLight('#ff9e44', 1.85, 18, 1.35);
+    indoorLight.position.set(0, 2.65, dirZ * 1.6);
     hearthGroup.add(indoorLight);
     group.add(hearthGroup);
 
-    // (C) 右後角：實木餐桌、座椅與職業專屬擺設 (對應 x + 94..128 => 本地 X = +4.5m)
+    // =========================================================================
+    // (C) 右後角：實木餐桌、烤肉拼盤、正立精準面向餐桌的雙座椅與職業擺設 (本地 X = +4.5m)
+    // =========================================================================
     const tableGroup = new THREE.Group();
-    tableGroup.position.set(4.5, 0.15, backFurnZ);
+    tableGroup.position.set(4.5, 0.16, backFurnZ);
 
+    const tblX = -0.35;
+    const tblZ = 0.0;
     const tableProto = this.modelPrototypes.get('table');
     if (tableProto) {
       const tbl = tableProto.clone(true);
       tbl.scale.set(2.1, 1.7, 2.1);
-      tbl.position.set(-0.3, 0, 0);
+      tbl.position.set(tblX, 0, tblZ);
       tableGroup.add(tbl);
     } else {
       const fallbackTbl = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.95, 1.5), timberMat);
-      fallbackTbl.position.y = 0.48;
+      fallbackTbl.position.set(tblX, 0.48, tblZ);
       tableGroup.add(fallbackTbl);
     }
 
-    const chairProto = this.modelPrototypes.get('chair');
-    if (chairProto) {
-      const ch = chairProto.clone(true);
-      ch.scale.set(1.6, 1.6, 1.6);
-      ch.position.set(-0.3, 0, dirZ * 1.15);
-      ch.rotation.y = isNorthRow ? Math.PI : 0;
-      tableGroup.add(ch);
+    // 桌面中央豐盛烤肉木盤 (fooddish.glb)
+    const dishProto = this.modelPrototypes.get('fooddish');
+    if (dishProto) {
+      const dish = dishProto.clone(true);
+      dish.scale.set(1.15, 1.15, 1.15);
+      dish.position.set(tblX + 0.25, 1.08, tblZ);
+      tableGroup.add(dish);
     }
 
-    // 根據屋主職業主題擺放專屬道具 (煉金藥瓶/占卜水晶球/農夫木桶/獵人木箱)
+    // 兩張正立實木靠背椅 (chair.glb，椅背位於本地 -Z、座面朝向本地 +Z)
+    // 透過 Math.atan2(tblX - cx, tblZ - cz) 確保每張椅子 100% 正對餐桌中心！
+    const chairProto = this.modelPrototypes.get('chair');
+    if (chairProto) {
+      // 主位座椅 (餐桌前方，面向餐桌)
+      const chFrontX = tblX;
+      const chFrontZ = dirZ * 1.18;
+      const chFront = chairProto.clone(true);
+      chFront.scale.set(1.55, 1.55, 1.55);
+      chFront.position.set(chFrontX, 0, chFrontZ);
+      chFront.rotation.y = Math.atan2(tblX - chFrontX, tblZ - chFrontZ);
+      tableGroup.add(chFront);
+
+      // 側位座椅 (餐桌左側，面向餐桌)
+      const chSideX = tblX - 1.55;
+      const chSideZ = 0.0;
+      const chSide = chairProto.clone(true);
+      chSide.scale.set(1.55, 1.55, 1.55);
+      chSide.position.set(chSideX, 0, chSideZ);
+      chSide.rotation.y = Math.atan2(tblX - chSideX, tblZ - chSideZ);
+      tableGroup.add(chSide);
+    }
+
+    // 額外實木圓凳 (stool.glb) 擺放於餐桌斜角
+    const stoolProto = this.modelPrototypes.get('stool');
+    if (stoolProto) {
+      const stX = tblX + 1.25;
+      const stZ = dirZ * 0.95;
+      const st = stoolProto.clone(true);
+      st.scale.set(1.5, 1.5, 1.5);
+      st.position.set(stX, 0, stZ);
+      st.rotation.y = Math.atan2(tblX - stX, tblZ - stZ);
+      tableGroup.add(st);
+    }
+
+    // 橡木桶、儲物木箱與提水木桶 (barrel.glb / crate.glb / bucket.glb)
     const barrelProto = this.modelPrototypes.get('barrel');
     const crateProto = this.modelPrototypes.get('crate');
+    const bucketProto = this.modelPrototypes.get('bucket');
     if (barrelProto) {
       const b = barrelProto.clone(true);
       b.scale.set(1.4, 1.4, 1.4);
-      b.position.set(1.35, 0, -dirZ * 0.4);
+      b.position.set(1.45, 0, -dirZ * 0.45);
       tableGroup.add(b);
     }
     if (crateProto) {
       const cr = crateProto.clone(true);
       cr.scale.set(1.2, 1.2, 1.2);
-      cr.position.set(1.35, 0, dirZ * 0.65);
+      cr.position.set(1.45, 0, dirZ * 0.65);
       tableGroup.add(cr);
+    }
+    if (bucketProto) {
+      const bk = bucketProto.clone(true);
+      bk.scale.set(1.6, 1.6, 1.6);
+      bk.position.set(-2.35, 0, -dirZ * 0.55);
+      tableGroup.add(bk);
     }
 
     if (theme === 'ALCHEMIST' || theme === 'SEER') {
       // 桌面上發光的煉金藥劑瓶與占卜水晶球
       const orbColor = theme === 'SEER' ? '#c084fc' : '#34d399';
+      const orbBase = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.14, 10), brassMat);
+      orbBase.position.set(tblX - 0.35, 1.14, tblZ);
+      tableGroup.add(orbBase);
+
       const orb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.32, 12, 12),
+        new THREE.SphereGeometry(0.26, 14, 14),
         new THREE.MeshStandardMaterial({
           color: orbColor,
           emissive: orbColor,
-          emissiveIntensity: 1.8,
-          roughness: 0.15
+          emissiveIntensity: 1.9,
+          roughness: 0.12
         })
       );
-      orb.position.set(-0.3, 1.32, 0);
+      orb.position.set(tblX - 0.35, 1.38, tblZ);
       tableGroup.add(orb);
     }
     group.add(tableGroup);
 
-    // 5. 可掀式斜頂屋頂與煙囪組 (roofGroup：第三人稱進屋自動隱藏以俯瞰室內，第一人稱進屋保持顯示！)
-    const roofGroup = new THREE.Group();
-    roofGroup.position.y = wallH;
+    // =========================================================================
+    // (D) 室內東側牆邊：三層中世紀實木藏書與煉金藥劑陳列架 (本地 X = +6.35m, Z = +dirZ * 0.8m)
+    // =========================================================================
+    const shelfGroup = new THREE.Group();
+    shelfGroup.position.set(6.35, 0.16, dirZ * 0.8);
+    const shelfBack = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.55, 2.4), timberMat);
+    shelfBack.position.set(0.22, 1.28, 0);
+    shelfBack.castShadow = true;
+    shelfGroup.add(shelfBack);
 
-    const roofPitchH = 3.6;
-    const slopeLen = Math.hypot(D / 2 + 1.1, roofPitchH);
-    const slopeAngle = Math.atan2(roofPitchH, D / 2 + 1.1);
+    for (const sz of [-1.15, 1.15]) {
+      const sidePanel = new THREE.Mesh(new THREE.BoxGeometry(0.58, 2.55, 0.14), bedOakMat);
+      sidePanel.position.set(0, 1.28, sz);
+      shelfGroup.add(sidePanel);
+    }
 
-    const roofHalfFront = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.28, slopeLen), roofMat);
-    roofHalfFront.position.set(0, roofPitchH / 2 - 0.1, (D / 4 + 0.45));
-    roofHalfFront.rotation.x = slopeAngle;
-    roofHalfFront.castShadow = true;
-    roofGroup.add(roofHalfFront);
+    const bookColors = ['#dc2626', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0d9488'];
+    for (let s = 0; s < 4; s++) {
+      const sy = 0.22 + s * 0.72;
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.10, 2.3), bedOakMat);
+      plank.position.set(0, sy, 0);
+      shelfGroup.add(plank);
 
-    const roofHalfBack = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.28, slopeLen), roofMat);
-    roofHalfBack.position.set(0, roofPitchH / 2 - 0.1, -(D / 4 + 0.45));
-    roofHalfBack.rotation.x = -slopeAngle;
-    roofHalfBack.castShadow = true;
-    roofGroup.add(roofHalfBack);
+      if (s < 3) {
+        for (let bIdx = 0; bIdx < 5; bIdx++) {
+          const bookMat = new THREE.MeshStandardMaterial({
+            color: bookColors[(s * 5 + bIdx) % bookColors.length],
+            roughness: 0.7
+          });
+          const book = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.44, 0.14), bookMat);
+          book.position.set(-0.02, sy + 0.27, -0.78 + bIdx * 0.32);
+          book.rotation.x = bIdx === 4 ? 0.22 : 0;
+          shelfGroup.add(book);
+        }
+      }
+    }
+    group.add(shelfGroup);
 
-    const ridgeBeam = new THREE.Mesh(new THREE.BoxGeometry(W + 1.6, 0.42, 0.45), timberMat);
-    ridgeBeam.position.set(0, roofPitchH - 0.05, 0);
-    roofGroup.add(ridgeBeam);
-
-    // 石砌煙囪
-    const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.8, 1.4), stoneMat);
-    chimney.position.set(0, roofPitchH * 0.65, -dirZ * 4.5);
-    chimney.castShadow = true;
-    roofGroup.add(chimney);
-
-    group.add(roofGroup);
     this.scene.add(group);
 
     this.cottageInstances.set(id, {
