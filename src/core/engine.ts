@@ -139,7 +139,116 @@ export class GameEngine {
       }
     }
 
+    // 3. 檢測是否在木屋室內（按 [E] 鎖門 / 開鎖 或 走出木屋）
+    if (player.insideCottageId) {
+      const cottage = this.map.cottages.find(c => c.id === player.insideCottageId);
+      if (cottage) {
+        const isOwner = player.assignedCottageId === cottage.id;
+        const doorCenterX = cottage.doorRect.x + cottage.doorRect.width / 2;
+        const doorCenterY = cottage.doorRect.y + cottage.doorRect.height / 2;
+        const distToDoor = Math.hypot(player.x - doorCenterX, player.y - doorCenterY);
+
+        if (distToDoor < 45) {
+          const isNorth = cottage.rect.y < 400;
+          player.y = isNorth ? cottage.doorRect.y + cottage.doorRect.height + 25 : cottage.doorRect.y - 25;
+          player.x = doorCenterX;
+          player.insideCottageId = null;
+          this.fsm.updatePlayer(player);
+          return { success: true, message: `你走出了 ${cottage.name}。` };
+        } else if (isOwner) {
+          cottage.isLocked = !cottage.isLocked;
+          return {
+            success: true,
+            message: cottage.isLocked
+              ? `🔒 你已將 ${cottage.name} 緊緊反鎖！今晚狼人無法闖入破壞。`
+              : `🔓 你打開了 ${cottage.name} 的門鎖。`
+          };
+        } else {
+          return { success: false, message: `你身在 ${cottage.name} 室內，靠近門口即可按 [E] 離開。` };
+        }
+      }
+    }
+
+    // 4. 檢測是否在木屋門口（按 [E] 進入木屋）
+    for (const cottage of this.map.cottages) {
+      const doorCenterX = cottage.doorRect.x + cottage.doorRect.width / 2;
+      const doorCenterY = cottage.doorRect.y + cottage.doorRect.height / 2;
+      const distToDoor = Math.hypot(player.x - doorCenterX, player.y - doorCenterY);
+
+      if (distToDoor < 55) {
+        const isOwner = player.assignedCottageId === cottage.id;
+        if (cottage.isLocked && !isOwner) {
+          return { success: false, message: `🔒 房門已從內部鎖上，你不是這間木屋的主人，無法進入！` };
+        }
+        player.x = cottage.rect.x + cottage.rect.width / 2;
+        player.y = cottage.rect.y + cottage.rect.height / 2;
+        player.insideCottageId = cottage.id;
+        this.fsm.updatePlayer(player);
+        return {
+          success: true,
+          message: isOwner
+            ? `🏠 你回到了自己的專屬小屋 (${cottage.name}) 避難！在室內按 [E] 可反鎖門鎖。`
+            : `🚪 你進入了 ${cottage.name} 作客。`
+        };
+      }
+    }
+
     return { success: false, message: '附近沒有可互動的物件。' };
+  }
+
+  /**
+   * 獲取當前位置可觸發的 [E] 互動提示文字
+   */
+  public getInteractionPrompt(playerId: PlayerId): string | null {
+    const snapshot = this.fsm.getSnapshot();
+    const player = snapshot.players[playerId];
+    if (!player || !player.isAlive) return null;
+
+    // 麥田
+    for (const patch of this.map.wheatPatches) {
+      if (isPointInRect(player.x, player.y, patch.rect)) {
+        return snapshot.phase === GamePhase.AFTERNOON ? '🌾 按 [E] 收割金黃小麥' : '🌾 小麥生長中 (下午可收割)';
+      }
+    }
+
+    // 肉架
+    for (const rack of this.map.meatRacks) {
+      if (isPointInRect(player.x, player.y, rack.rect)) {
+        return player.role === RoleType.WEREWOLF ? '🥩 按 [E] 吞食鮮肉' : '🥩 生鮮燻肉架';
+      }
+    }
+
+    // 室內
+    if (player.insideCottageId) {
+      const cottage = this.map.cottages.find(c => c.id === player.insideCottageId);
+      if (cottage) {
+        const isOwner = player.assignedCottageId === cottage.id;
+        const doorCenterX = cottage.doorRect.x + cottage.doorRect.width / 2;
+        const doorCenterY = cottage.doorRect.y + cottage.doorRect.height / 2;
+        const distToDoor = Math.hypot(player.x - doorCenterX, player.y - doorCenterY);
+        if (distToDoor < 45) {
+          return '🚪 按 [E] 走出木屋';
+        } else if (isOwner) {
+          return cottage.isLocked ? '🔓 按 [E] 打開門鎖' : '🔒 按 [E] 反鎖小屋防狼';
+        }
+      }
+    }
+
+    // 室外門口
+    for (const cottage of this.map.cottages) {
+      const doorCenterX = cottage.doorRect.x + cottage.doorRect.width / 2;
+      const doorCenterY = cottage.doorRect.y + cottage.doorRect.height / 2;
+      const distToDoor = Math.hypot(player.x - doorCenterX, player.y - doorCenterY);
+      if (distToDoor < 55) {
+        const isOwner = player.assignedCottageId === cottage.id;
+        if (cottage.isLocked && !isOwner) {
+          return '🔒 房門已反鎖';
+        }
+        return isOwner ? `🏠 按 [E] 進入專屬木屋` : `🚪 按 [E] 進入 ${cottage.name}`;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -200,6 +309,17 @@ export class GameEngine {
     const wolf = snapshot.players[wolfId];
     const victim = snapshot.players[victimId];
     if (!wolf || !victim) return { success: false, message: '玩家不存在' };
+
+    // 檢查受害者是否躲在已反鎖的木屋中
+    if (victim.insideCottageId) {
+      const cottage = this.map.cottages.find(c => c.id === victim.insideCottageId);
+      if (cottage?.isLocked) {
+        return {
+          success: false,
+          message: `🔒 ${victim.name} 將木屋房門牢牢反鎖了！厚重的大門阻擋了你的利爪！`
+        };
+      }
+    }
 
     const killRes = executeWerewolfKill(wolf, victim);
     if (killRes.success || killRes.message.includes('破碎')) {

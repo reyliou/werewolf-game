@@ -84,6 +84,46 @@ function runTests() {
   const snapNight = engine.fsm.getSnapshot();
   if (snapNight.phase !== GamePhase.NIGHT) throw new Error('未切換至黑夜時段！');
 
+  // 6.1 測試木屋按 E 進出與反鎖防狼機制
+  // 將村民 p1 移至其專屬 1 號木屋門口
+  const c1 = engine.map.cottages[0];
+  snapNight.players['p1'].x = c1.doorRect.x + c1.doorRect.width / 2;
+  snapNight.players['p1'].y = c1.doorRect.y + 10;
+  engine.fsm.updatePlayer(snapNight.players['p1']);
+
+  const enterRes = engine.handleInteract('p1');
+  console.log(`✅ 6.1 木屋進入測試: ${enterRes.message}`);
+  if (engine.fsm.getSnapshot().players['p1'].insideCottageId !== c1.id) throw new Error('未能成功進入木屋！');
+
+  // 屋主在室內深處按 [E] 反鎖房門
+  const p1Current = engine.fsm.getSnapshot().players['p1'];
+  p1Current.x = c1.rect.x + c1.rect.width / 2;
+  p1Current.y = c1.rect.y + c1.rect.height / 2;
+  engine.fsm.updatePlayer(p1Current);
+
+  const lockRes = engine.handleInteract('p1');
+  console.log(`✅ 6.2 木屋室內反鎖測試: ${lockRes.message}`);
+  if (!c1.isLocked) throw new Error('木屋未成功反鎖！');
+
+  // 狼人試圖在黑夜中襲擊躲在反鎖木屋內的 p1
+  const p5Current = engine.fsm.getSnapshot().players['p5'];
+  p5Current.x = p1Current.x;
+  p5Current.y = p1Current.y;
+  engine.fsm.updatePlayer(p5Current);
+
+  const attackLockedRes = engine.handleWerewolfAttack('p5', 'p1');
+  console.log(`✅ 6.3 狼人襲擊反鎖木屋結果: ${attackLockedRes.message}`);
+  if (attackLockedRes.success) throw new Error('反鎖木屋未能擋下狼人攻擊！');
+
+  // 走出木屋回到室外 (移動到門口附近)
+  p1Current.x = c1.doorRect.x + c1.doorRect.width / 2;
+  p1Current.y = c1.doorRect.y + 10;
+  engine.fsm.updatePlayer(p1Current);
+
+  const exitRes = engine.handleInteract('p1');
+  console.log(`✅ 6.4 走出木屋測試: ${exitRes.message}`);
+  if (engine.fsm.getSnapshot().players['p1'].insideCottageId !== null) throw new Error('未能成功走出木屋！');
+
   // 藥劑師為自己套盾
   engine.handleSkillCast('p2');
 

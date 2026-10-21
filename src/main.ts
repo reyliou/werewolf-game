@@ -57,9 +57,35 @@ const letterContent = document.getElementById('letter-content') as HTMLInputElem
 const btnCloseLetter = document.getElementById('btn-close-letter')!;
 const btnSendLetter = document.getElementById('btn-send-letter')!;
 const btnLetters = document.getElementById('btn-letters')!;
+const tabCompose = document.getElementById('tab-compose')!;
+const tabInbox = document.getElementById('tab-inbox')!;
+const panelCompose = document.getElementById('panel-compose')!;
+const panelInbox = document.getElementById('panel-inbox')!;
+const inboxCount = document.getElementById('inbox-count')!;
+const letterInboxList = document.getElementById('letter-inbox-list')!;
+const btnCloseInbox = document.getElementById('btn-close-inbox')!;
+
+const interactionPrompt = document.getElementById('interaction-prompt')!;
+const promptText = document.getElementById('prompt-text')!;
+const gameToast = document.getElementById('game-toast')!;
 
 const btnInteract = document.getElementById('btn-interact')!;
 const btnSkill = document.getElementById('btn-skill')!;
+
+// 提示訊息浮窗 Toast
+let toastTimer: number | null = null;
+function showToast(message: string, durationMs: number = 2800) {
+  if (toastTimer) window.clearTimeout(toastTimer);
+  gameToast.innerText = message;
+  gameToast.style.display = 'block';
+  gameToast.style.opacity = '1';
+  toastTimer = window.setTimeout(() => {
+    gameToast.style.opacity = '0';
+    setTimeout(() => {
+      gameToast.style.display = 'none';
+    }, 300);
+  }, durationMs);
+}
 
 // 遊戲狀態模式
 type GameMode = 'NONE' | 'HOST' | 'CLIENT' | 'SOLO';
@@ -228,10 +254,14 @@ btnInteract.addEventListener('click', () => {
 function triggerInteractAction() {
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleInteract(localPlayerId);
-    console.log(`[互動] ${res?.message}`);
-    if (res?.success) {
-      if (res.message.includes('小麥')) soundManager.playFootstep();
-      if (res.message.includes('鮮肉')) soundManager.playKillStrike();
+    if (res) {
+      showToast(res.message);
+      if (res.success) {
+        if (res.message.includes('小麥')) soundManager.playFootstep();
+        else if (res.message.includes('鮮肉')) soundManager.playKillStrike();
+        else if (res.message.includes('反鎖') || res.message.includes('避難')) soundManager.playShieldShatter();
+        else soundManager.playFootstep();
+      }
     }
   } else if (currentMode === 'CLIENT') {
     clientInstance?.sendInput(0, 0, 0, 'INTERACT');
@@ -248,17 +278,40 @@ btnSkill.addEventListener('click', () => {
 function triggerSkillAction() {
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleSkillCast(localPlayerId);
-    console.log(`[技能/變身] ${res?.message}`);
+    if (res) {
+      showToast(res.message);
+      if (res.success && res.message.includes('狂暴巨狼')) {
+        soundManager.playKillStrike();
+      }
+    }
   } else if (currentMode === 'CLIENT') {
     clientInstance?.sendInput(0, 0, 0, 'SKILL');
   }
 }
 
-// 秘密書信面板按鈕
+// 秘密羊皮紙書信面板頁籤切換
+tabCompose.addEventListener('click', () => {
+  tabCompose.classList.add('active');
+  tabInbox.classList.remove('active');
+  panelCompose.style.display = 'block';
+  panelInbox.style.display = 'none';
+});
+
+tabInbox.addEventListener('click', () => {
+  tabInbox.classList.add('active');
+  tabCompose.classList.remove('active');
+  panelCompose.style.display = 'none';
+  panelInbox.style.display = 'block';
+  renderInboxList();
+});
+
 btnLetters.addEventListener('click', () => {
   openLettersUI();
 });
 btnCloseLetter.addEventListener('click', () => {
+  letterModal.style.display = 'none';
+});
+btnCloseInbox.addEventListener('click', () => {
   letterModal.style.display = 'none';
 });
 
@@ -273,11 +326,11 @@ btnSendLetter.addEventListener('click', () => {
     clientInstance?.sendLetter(targetId, content);
   }
 
-  alert('秘密信件已由夜鷹送出！');
+  showToast('🕊️ 封蠟密函已由夜鷹穿過暮色秘密送達！');
   letterModal.style.display = 'none';
 });
 
-function openLettersUI() {
+function openLettersUI(preferInbox: boolean = false) {
   const snap = getActiveSnapshot();
   if (!snap) return;
 
@@ -291,7 +344,48 @@ function openLettersUI() {
     opt.innerText = `${p.name} (${p.assignedCottageId})`;
     letterRecipient.appendChild(opt);
   }
+
+  const me = snap.players[localPlayerId];
+  const unreadCount = me?.unreadLetters?.length || 0;
+  inboxCount.innerText = String(unreadCount);
+
+  if (preferInbox || unreadCount > 0) {
+    tabInbox.click();
+  } else {
+    tabCompose.click();
+  }
+
   letterModal.style.display = 'flex';
+}
+
+function renderInboxList() {
+  const snap = getActiveSnapshot();
+  const me = snap?.players[localPlayerId];
+  if (!me || !me.unreadLetters || me.unreadLetters.length === 0) {
+    letterInboxList.innerHTML = `
+      <div style="text-align: center; color: #8c6239; padding: 24px 0; font-style: italic;">
+        🕊️ 信箱中尚無來信。黃昏時段可等待其他村民或暗線的密報。
+      </div>
+    `;
+    return;
+  }
+
+  letterInboxList.innerHTML = '';
+  for (const letter of me.unreadLetters) {
+    const item = document.createElement('div');
+    item.className = 'letter-item';
+    const timeStr = new Date(letter.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    item.innerHTML = `
+      <div class="letter-item-header">
+        <span>🕊️ 發信人: <strong>${letter.fromName}</strong></span>
+        <span>${timeStr}</span>
+      </div>
+      <div class="letter-item-body">
+        "${letter.content}"
+      </div>
+    `;
+    letterInboxList.appendChild(item);
+  }
 }
 
 btnSkipVote.addEventListener('click', () => {
@@ -400,10 +494,78 @@ function gameLoop(now: number) {
     hudRole.innerText = me ? `${me.name} [${me.role}] (${me.assignedCottageId})` : '旁觀中';
     hudTimer.innerText = `${Math.ceil(activeSnapshot.phaseRemainingTime)}s`;
 
+    // 時段切換情境提醒
+    if (activeSnapshot.phase !== lastPhase) {
+      if (activeSnapshot.phase === GamePhase.DUSK) {
+        showToast('🌅 黃昏降臨！夜鷹飛旋，請抓緊時間傳遞秘密信函！', 3500);
+        soundManager.playBell();
+      } else if (activeSnapshot.phase === GamePhase.NIGHT) {
+        showToast('🌑 暗夜降臨！狂暴巨狼出沒，請速回專屬木屋並按 [E] 反鎖避難！', 4000);
+        soundManager.setHeartbeatActive(true);
+      } else if (activeSnapshot.phase === GamePhase.AFTERNOON) {
+        soundManager.setHeartbeatActive(false);
+        showToast('🌾 下午工作時間！村民請前往西側麥田揮鐮割麥！', 3000);
+      } else {
+        soundManager.setHeartbeatActive(false);
+      }
+    }
+
+    // 動態感應 [E] 互動提示
+    let prompt: string | null = null;
+    if (hostInstance) {
+      prompt = hostInstance.engine.getInteractionPrompt(localPlayerId);
+    } else if (me) {
+      for (const patch of VILLAGE_MAP.wheatPatches) {
+        if (me.x >= patch.rect.x && me.x <= patch.rect.x + patch.rect.width && me.y >= patch.rect.y && me.y <= patch.rect.y + patch.rect.height) {
+          prompt = activeSnapshot.phase === GamePhase.AFTERNOON ? '🌾 按 [E] 收割金黃小麥' : '🌾 小麥生長中 (下午可收割)';
+        }
+      }
+      for (const rack of VILLAGE_MAP.meatRacks) {
+        if (me.x >= rack.rect.x && me.x <= rack.rect.x + rack.rect.width && me.y >= rack.rect.y && me.y <= rack.rect.y + rack.rect.height) {
+          prompt = me.role === RoleType.WEREWOLF ? '🥩 按 [E] 吞食鮮肉' : '🥩 生鮮燻肉架';
+        }
+      }
+      if (me.insideCottageId) {
+        const cot = VILLAGE_MAP.cottages.find(c => c.id === me.insideCottageId);
+        if (cot) {
+          const dcX = cot.doorRect.x + cot.doorRect.width / 2;
+          const dcY = cot.doorRect.y + cot.doorRect.height / 2;
+          if (Math.hypot(me.x - dcX, me.y - dcY) < 45) {
+            prompt = '🚪 按 [E] 走出木屋';
+          } else if (me.assignedCottageId === cot.id) {
+            prompt = cot.isLocked ? '🔓 按 [E] 打開門鎖' : '🔒 按 [E] 反鎖小屋防狼';
+          }
+        }
+      } else {
+        for (const cot of VILLAGE_MAP.cottages) {
+          const dcX = cot.doorRect.x + cot.doorRect.width / 2;
+          const dcY = cot.doorRect.y + cot.doorRect.height / 2;
+          if (Math.hypot(me.x - dcX, me.y - dcY) < 55) {
+            prompt = me.assignedCottageId === cot.id ? '🏠 按 [E] 進入專屬木屋' : `🚪 按 [E] 進入 ${cot.name}`;
+          }
+        }
+      }
+    }
+
+    if (prompt) {
+      interactionPrompt.style.display = 'flex';
+      promptText.innerText = prompt;
+      btnInteract.innerText = prompt;
+    } else {
+      interactionPrompt.style.display = 'none';
+      btnInteract.innerText = '🌾 互動 / 割麥 / 進屋 [E]';
+    }
+
     if (me) {
-      btnLetters.innerText = `✉️ 書信信箱 (${me.unreadLetters.length}封未讀)`;
-      if (me.unreadLetters.length > 0) {
+      const unreadCount = me.unreadLetters?.length || 0;
+      btnLetters.innerText = `✉️ 秘密書信 (${unreadCount}封未讀)`;
+      inboxCount.innerText = String(unreadCount);
+      if (unreadCount > 0) {
         btnLetters.style.borderColor = '#facc15';
+        btnLetters.style.boxShadow = '0 0 12px rgba(250, 204, 21, 0.6)';
+      } else {
+        btnLetters.style.borderColor = '#a855f7';
+        btnLetters.style.boxShadow = 'none';
       }
     }
 

@@ -17,6 +17,7 @@ export interface Cottage {
   rect: Rect;            // 木屋本體矩形
   doorRect: Rect;        // 門口出入口感應區 (踩入即進屋)
   interiorColor: string;
+  isLocked?: boolean;    // 是否上鎖防範狼人
 }
 
 export interface WheatPatch {
