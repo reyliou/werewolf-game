@@ -473,13 +473,11 @@ export class ThreeVillageRenderer {
    */
   private async loadAllGLBModels(): Promise<void> {
     const modelPaths: Record<string, string> = {
-      // 4 種不同風格的村民木屋與高細節可走入式分層木屋 (Walls_Static / Walls_Front / Door_Panel / Roof_Cutaway)
+      // 4 種不同風格的村民木屋與職業專屬建築
       house1: '/assets/models/house_01.glb',
       house2: '/assets/models/house_02.glb',
       house3: '/assets/models/house_03.glb',
       house4: '/assets/models/house_04.glb',
-      cottage_a: '/assets/models/cottage_walkin_a.glb',
-      cottage_b: '/assets/models/cottage_walkin_b.glb',
       barn: '/assets/models/barn.glb',
       watchtower: '/assets/models/watchtower.glb',
       // 村莊設施與室內精細家具農具 (已修正世界座標正立軸向)
@@ -786,7 +784,8 @@ export class ThreeVillageRenderer {
     const W = 15.4;          // 對應 2D 寬 140 * 0.11
     const D = 13.2;          // 對應 2D 深 120 * 0.11
     const wallT = 1.1;       // 對應 2D 牆厚 10 * 0.11
-    const wallH = 3.55;      // 一樓牆體切齊高度
+    const wallH = 4.2;       // 一樓牆體高度
+    const sideDoorW = 4.62;  // 對應 2D 門側牆 42 * 0.11 (中間留出 6.16m 寬敞大門通道)
     const dirZ = isNorthRow ? 1 : -1; // 北排大門朝 +Z (南)，南排大門朝 -Z (北)
 
     const timberMat = new THREE.MeshStandardMaterial({ color: '#3b1704', roughness: 0.85 });
@@ -835,103 +834,349 @@ export class ThreeVillageRenderer {
     rugInner.receiveShadow = true;
     group.add(rugInner);
 
-    // 2. 載入高細節 Low-Poly 木屋分層結構 (cottage_a: 單層廊柱木屋 / cottage_b: 雙層山牆莊園木屋)
+    // 2. 高細節都鐸式木骨磚石木屋建築結構 (100% 貼合 map-data.ts 碰撞箱 15.4m x 13.2m，零破圖變形！)
+    const backWallZ = -dirZ * (D / 2 - wallT / 2);
     const frontWallZ = dirZ * (D / 2 - wallT / 2);
-    const doorHalfGap = 2.42; // 對應 GLB 門框開口 X in [-2.42, +2.42]
-    const frontWallGroup = new THREE.Group();
-    const roofGroup = new THREE.Group();
-    const doorPivot = new THREE.Group();
-    doorPivot.position.set(-doorHalfGap, 0.18, frontWallZ);
+    const leftWallX = -(W / 2 - wallT / 2);
+    const rightWallX = W / 2 - wallT / 2;
 
-    const useStyleB = id === 'cottage-2' || id === 'cottage-4' || id === 'cottage-6';
-    const cottageProto = this.modelPrototypes.get(useStyleB ? 'cottage_b' : 'cottage_a');
-    const archRotY = isNorthRow ? 0 : Math.PI;
+    const plasterMat = new THREE.MeshStandardMaterial({ color: '#f5ebd6', roughness: 0.88 });
+    const frontPlasterMat = new THREE.MeshStandardMaterial({ color: '#f5ebd6', roughness: 0.88 });
+    const wainscotMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.84 });
+    const frontWainscotMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.84 });
+    const frontTimberMat = new THREE.MeshStandardMaterial({ color: '#3b1704', roughness: 0.85 });
+    const frontStoneMat = new THREE.MeshStandardMaterial({ color: '#57534e', roughness: 0.92 });
+    const lightStoneMat = new THREE.MeshStandardMaterial({ color: '#78716c', roughness: 0.90 });
+    const shutterMat = new THREE.MeshStandardMaterial({ color: '#1e3a2f', roughness: 0.82 });
+    const frontShutterMat = new THREE.MeshStandardMaterial({ color: '#1e3a2f', roughness: 0.82 });
+    const winGlassMat = new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#f59e0b',
+      emissiveIntensity: 1.1,
+      roughness: 0.2
+    });
+    const frontWinGlassMat = winGlassMat.clone();
 
-    if (cottageProto) {
-      const archClone = cottageProto.clone(true);
+    const roofColorPrimary = new THREE.Color(roofHex);
+    const roofColorSecondary = roofColorPrimary.clone().multiplyScalar(0.78);
+    const roofMatPrimary = new THREE.MeshStandardMaterial({ color: roofColorPrimary, roughness: 0.78, side: THREE.DoubleSide });
+    const roofMatSecondary = new THREE.MeshStandardMaterial({ color: roofColorSecondary, roughness: 0.82, side: THREE.DoubleSide });
+    const frontRoofMat = roofMatPrimary.clone();
 
-      let wallsStaticObj: THREE.Object3D | null = null;
-      let wallsFrontObj: THREE.Object3D | null = null;
-      let doorPanelObj: THREE.Object3D | null = null;
-      let roofCutawayObj: THREE.Object3D | null = null;
+    // (2.1) 後牆與左右側牆主結構：下層石砌基座 + 中層企口護牆木板 + 上層都鐸灰泥牆
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, wallH, wallT), plasterMat);
+    backWall.position.set(0, wallH / 2, backWallZ);
+    backWall.castShadow = true;
+    backWall.receiveShadow = true;
+    group.add(backWall);
 
-      archClone.traverse((child) => {
-        if (child.name.startsWith('Walls_Static')) wallsStaticObj = child;
-        else if (child.name.startsWith('Walls_Front')) wallsFrontObj = child;
-        else if (child.name.startsWith('Door_Panel')) doorPanelObj = child;
-        else if (child.name.startsWith('Roof_Cutaway')) roofCutawayObj = child;
-      });
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, D), plasterMat);
+    leftWall.position.set(leftWallX, wallH / 2, 0);
+    leftWall.castShadow = true;
+    leftWall.receiveShadow = true;
+    group.add(leftWall);
 
-      // 替每個部位獨立複製材質，讓每棟木屋擁有專屬屋頂瓦片色澤且半透明化互不干擾
-      const cloneAndTintMaterials = (rootObj: THREE.Object3D, tintRoof: boolean) => {
-        rootObj.traverse((node) => {
-          if ((node as THREE.Mesh).isMesh) {
-            const mesh = node as THREE.Mesh;
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            const cloneMat = (m: THREE.Material): THREE.Material => {
-              const cm = m.clone() as THREE.MeshStandardMaterial;
-              cm.side = THREE.DoubleSide;
-              if (tintRoof && cm.name && cm.name.includes('Roof_Main')) {
-                cm.color.set(roofHex);
-              }
-              return cm;
-            };
-            if (Array.isArray(mesh.material)) {
-              mesh.material = mesh.material.map(cloneMat);
-            } else if (mesh.material) {
-              mesh.material = cloneMat(mesh.material);
-            }
-          }
-        });
-      };
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, D), plasterMat);
+    rightWall.position.set(rightWallX, wallH / 2, 0);
+    rightWall.castShadow = true;
+    rightWall.receiveShadow = true;
+    group.add(rightWall);
 
-      if (wallsStaticObj) {
-        const ws = wallsStaticObj as THREE.Object3D;
-        cloneAndTintMaterials(ws, false);
-        ws.rotation.y = archRotY;
-        group.add(ws);
+    // 外牆底部凸出石砌基座 (Stone Plinth) 與下層護牆木板 (Wainscoting)
+    const backPlinth = new THREE.Mesh(new THREE.BoxGeometry(W + 0.28, 0.68, wallT + 0.24), stoneMat);
+    backPlinth.position.set(0, 0.34, backWallZ);
+    group.add(backPlinth);
+
+    const backWainscot = new THREE.Mesh(new THREE.BoxGeometry(W + 0.10, 0.95, wallT + 0.10), wainscotMat);
+    backWainscot.position.set(0, 1.15, backWallZ);
+    group.add(backWainscot);
+
+    for (const sx of [leftWallX, rightWallX]) {
+      const sidePlinth = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.24, 0.68, D + 0.28), stoneMat);
+      sidePlinth.position.set(sx, 0.34, 0);
+      group.add(sidePlinth);
+
+      const sideWainscot = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.10, 0.95, D + 0.10), wainscotMat);
+      sideWainscot.position.set(sx, 1.15, 0);
+      group.add(sideWainscot);
+
+      // 側牆水平腰樑與頂樑
+      for (const by of [0.68, 1.65, wallH - 0.15]) {
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.18, 0.22, D + 0.32), timberMat);
+        beam.position.set(sx, by, 0);
+        group.add(beam);
       }
 
-      if (wallsFrontObj) {
-        const wf = wallsFrontObj as THREE.Object3D;
-        cloneAndTintMaterials(wf, false);
-        wf.rotation.y = archRotY;
-        frontWallGroup.add(wf);
+      // 側牆垂直木骨立柱與都鐸式斜撐木樑 (X-Bracing)
+      for (const bz of [-3.2, 0, 3.2]) {
+        const stud = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.18, wallH, 0.24), timberMat);
+        stud.position.set(sx, wallH / 2, bz);
+        group.add(stud);
       }
+      for (const bz of [-4.8, 4.8]) {
+        const brace1 = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.16, 2.75, 0.16), timberMat);
+        brace1.position.set(sx, 2.88, bz);
+        brace1.rotation.x = 0.55;
+        group.add(brace1);
 
-      if (doorPanelObj) {
-        const dp = doorPanelObj as THREE.Object3D;
-        cloneAndTintMaterials(dp, false);
-        dp.position.set(0, 0, 0);
-        doorPivot.add(dp);
+        const brace2 = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.16, 2.75, 0.16), timberMat);
+        brace2.position.set(sx, 2.88, bz);
+        brace2.rotation.x = -0.55;
+        group.add(brace2);
       }
-
-      if (roofCutawayObj) {
-        const rc = roofCutawayObj as THREE.Object3D;
-        cloneAndTintMaterials(rc, true);
-        rc.rotation.y = archRotY;
-        roofGroup.add(rc);
-      }
-    } else {
-      // 備援幾何牆體与門板 (當 GLB 尚未完成載入時)
-      const fallbackMat = new THREE.MeshStandardMaterial({ color: '#f3e5ab', roughness: 0.88 });
-      const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, wallH, wallT), fallbackMat);
-      backWall.position.set(0, wallH / 2, -frontWallZ);
-      group.add(backWall);
-
-      const fallbackDoor = new THREE.Mesh(
-        new THREE.BoxGeometry(doorHalfGap * 2, 2.9, 0.24),
-        new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.8 })
-      );
-      fallbackDoor.position.set(doorHalfGap, 1.45, 0);
-      doorPivot.add(fallbackDoor);
     }
 
+    // 後牆水平腰樑、垂直木骨立柱、斜撐木樑與外牆立體石砌煙囪柱
+    for (const by of [0.68, 1.65, wallH - 0.15]) {
+      const bBeam = new THREE.Mesh(new THREE.BoxGeometry(W + 0.32, 0.22, wallT + 0.18), timberMat);
+      bBeam.position.set(0, by, backWallZ);
+      group.add(bBeam);
+    }
+    for (const bx of [-5.2, -2.2, 2.2, 5.2]) {
+      const bStud = new THREE.Mesh(new THREE.BoxGeometry(0.24, wallH, wallT + 0.18), timberMat);
+      bStud.position.set(bx, wallH / 2, backWallZ);
+      group.add(bStud);
+    }
+    for (const bx of [-6.3, 6.3]) {
+      const bBrace = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.65, wallT + 0.16), timberMat);
+      bBrace.position.set(bx, 2.88, backWallZ);
+      bBrace.rotation.z = bx < 0 ? 0.48 : -0.48;
+      group.add(bBrace);
+    }
+
+    // 後牆外側貼合石造煙囪基座 (與室內壁爐及屋頂煙囪上下連通)
+    const extChimneyBase = new THREE.Mesh(new THREE.BoxGeometry(2.3, wallH + 0.2, 0.85), stoneMat);
+    extChimneyBase.position.set(0, wallH / 2, backWallZ - dirZ * 0.65);
+    extChimneyBase.castShadow = true;
+    group.add(extChimneyBase);
+
+    // 四角厚重胡桃木轉角柱與立體交替隅石 (Corner Quoins)
+    for (const px of [-W / 2 + 0.25, W / 2 - 0.25]) {
+      for (const pz of [-D / 2 + 0.25, D / 2 - 0.25]) {
+        const cornerPost = new THREE.Mesh(new THREE.BoxGeometry(0.68, wallH + 0.2, 0.68), timberMat);
+        cornerPost.position.set(px, wallH / 2, pz);
+        cornerPost.castShadow = true;
+        group.add(cornerPost);
+
+        for (let q = 0; q < 4; q++) {
+          const quoin = new THREE.Mesh(
+            new THREE.BoxGeometry(q % 2 === 0 ? 0.82 : 0.72, 0.36, q % 2 === 0 ? 0.82 : 0.72),
+            q % 2 === 0 ? stoneMat : lightStoneMat
+          );
+          quoin.position.set(px, 0.26 + q * 0.42, pz);
+          group.add(quoin);
+        }
+      }
+    }
+
+    // (2.2) 建立高細節 3D 多格百葉木窗與窗台花圃輔助函式
+    const createDetailedWindow = (isFront: boolean, withPlanter: boolean): THREE.Group => {
+      const wGroup = new THREE.Group();
+      const tMat = isFront ? frontTimberMat : timberMat;
+      const gMat = isFront ? frontWinGlassMat : winGlassMat;
+      const sMat = isFront ? frontShutterMat : shutterMat;
+      const stMat = isFront ? frontStoneMat : stoneMat;
+
+      // 窗框外圍與凸出石質窗台
+      const outerFrame = new THREE.Mesh(new THREE.BoxGeometry(1.75, 1.48, wallT + 0.20), tMat);
+      wGroup.add(outerFrame);
+
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.16, wallT + 0.38), stMat);
+      sill.position.y = -0.76;
+      wGroup.add(sill);
+
+      const hood = new THREE.Mesh(new THREE.BoxGeometry(1.98, 0.14, wallT + 0.34), tMat);
+      hood.position.y = 0.76;
+      wGroup.add(hood);
+
+      // 發光暖黃玻璃與十字木窗欞 (6 格窗)
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(1.48, 1.22, wallT + 0.24), gMat);
+      wGroup.add(glass);
+
+      const mullionV = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.24, wallT + 0.28), tMat);
+      wGroup.add(mullionV);
+      for (const my of [-0.22, 0.22]) {
+        const mullionH = new THREE.Mesh(new THREE.BoxGeometry(1.50, 0.08, wallT + 0.28), tMat);
+        mullionH.position.y = my;
+        wGroup.add(mullionH);
+      }
+
+      // 左右兩側外推立體木百葉窗扇 (Shutters)
+      for (const side of [-1, 1]) {
+        const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.46, 1.32, 0.10), sMat);
+        shutter.position.set(side * 1.06, 0, (wallT / 2 + 0.12));
+        shutter.rotation.y = -side * 0.32;
+        wGroup.add(shutter);
+
+        const shutterBack = shutter.clone();
+        shutterBack.position.set(side * 1.06, 0, -(wallT / 2 + 0.12));
+        shutterBack.rotation.y = side * 0.32;
+        wGroup.add(shutterBack);
+      }
+
+      // 正面窗戶專屬：木造窗台花圃與繽紛立體小花
+      if (withPlanter) {
+        const planter = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.32, 0.42), tMat);
+        planter.position.set(0, -0.98, dirZ * (wallT / 2 + 0.22));
+        wGroup.add(planter);
+
+        const foliage = new THREE.Mesh(
+          new THREE.BoxGeometry(1.56, 0.24, 0.32),
+          new THREE.MeshStandardMaterial({ color: '#15803d', roughness: 0.9 })
+        );
+        foliage.position.set(0, -0.78, dirZ * (wallT / 2 + 0.22));
+        wGroup.add(foliage);
+
+        const blossomColors = ['#f43f5e', '#fbbf24', '#c084fc', '#38bdf8'];
+        for (let fi = -2; fi <= 2; fi++) {
+          const flower = new THREE.Mesh(
+            new THREE.DodecahedronGeometry(0.11, 0),
+            new THREE.MeshStandardMaterial({ color: blossomColors[Math.abs(fi) % blossomColors.length], roughness: 0.6 })
+          );
+          flower.position.set(fi * 0.32, -0.64, dirZ * (wallT / 2 + 0.24));
+          wGroup.add(flower);
+        }
+      }
+      return wGroup;
+    };
+
+    // 左右側牆各配置 2 扇立體木窗，後牆配置 2 扇立體木窗
+    for (const wx of [leftWallX, rightWallX]) {
+      for (const wz of [-2.0, 2.0]) {
+        const sideWin = createDetailedWindow(false, false);
+        sideWin.rotation.y = Math.PI / 2;
+        sideWin.position.set(wx, 2.65, wz);
+        group.add(sideWin);
+      }
+    }
+    for (const bx of [-3.75, 3.75]) {
+      const backWin = createDetailedWindow(false, false);
+      backWin.position.set(bx, 2.65, backWallZ);
+      group.add(backWin);
+    }
+
+    // (2.3) 前牆組與可開關 3D 實木雕花鐵件大門 (frontWallGroup)
+    const frontWallGroup = new THREE.Group();
+    const doorHalfGap = (W - sideDoorW * 2) / 2; // 3.08m
+
+    for (const side of [-1, 1]) {
+      const segCenterX = side * (W / 2 - sideDoorW / 2);
+      const frontSeg = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW, wallH, wallT), frontPlasterMat);
+      frontSeg.position.set(segCenterX, wallH / 2, frontWallZ);
+      frontSeg.castShadow = true;
+      frontSeg.receiveShadow = true;
+      frontWallGroup.add(frontSeg);
+
+      const fPlinth = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW + 0.16, 0.68, wallT + 0.24), frontStoneMat);
+      fPlinth.position.set(segCenterX, 0.34, frontWallZ);
+      frontWallGroup.add(fPlinth);
+
+      const fWainscot = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW + 0.08, 0.95, wallT + 0.10), frontWainscotMat);
+      fWainscot.position.set(segCenterX, 1.15, frontWallZ);
+      frontWallGroup.add(fWainscot);
+
+      for (const by of [0.68, 1.65]) {
+        const fBeam = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW + 0.14, 0.22, wallT + 0.18), frontTimberMat);
+        fBeam.position.set(segCenterX, by, frontWallZ);
+        frontWallGroup.add(fBeam);
+      }
+
+      // 前牆左右對稱多格百葉木窗 (附窗台花圃)
+      const fWin = createDetailedWindow(true, true);
+      fWin.position.set(segCenterX, 2.68, frontWallZ);
+      frontWallGroup.add(fWin);
+    }
+
+    // 門楣貫通大橫樑與立體大門雨遮屋簷 (Porch Canopy Awning)
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(W + 0.32, 0.42, wallT + 0.22), frontTimberMat);
+    lintel.position.set(0, wallH - 0.21, frontWallZ);
+    lintel.castShadow = true;
+    frontWallGroup.add(lintel);
+
+    const awningSlope = new THREE.Mesh(new THREE.BoxGeometry(doorHalfGap * 2 + 1.4, 0.22, 1.65), frontRoofMat);
+    awningSlope.position.set(0, wallH - 0.35, frontWallZ + dirZ * 1.05);
+    awningSlope.rotation.x = dirZ * 0.36;
+    awningSlope.castShadow = true;
+    frontWallGroup.add(awningSlope);
+
+    // 門框厚實立柱、雨遮斜撐木托架與門口雙側暖光壁掛提燈
+    for (const side of [-1, 1]) {
+      const dx = side * doorHalfGap;
+      const framePost = new THREE.Mesh(new THREE.BoxGeometry(0.52, wallH, wallT + 0.26), frontTimberMat);
+      framePost.position.set(dx, wallH / 2, frontWallZ);
+      framePost.castShadow = true;
+      frontWallGroup.add(framePost);
+
+      const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.25, 0.22), frontTimberMat);
+      bracket.position.set(dx, wallH - 0.85, frontWallZ + dirZ * 0.85);
+      bracket.rotation.x = -dirZ * 0.65;
+      frontWallGroup.add(bracket);
+
+      // 壁掛鑄鐵提燈架與發光燈籠
+      const lanternArm = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.10, 0.55), ironMat);
+      lanternArm.position.set(dx + side * 0.42, 2.65, frontWallZ + dirZ * (wallT / 2 + 0.22));
+      frontWallGroup.add(lanternArm);
+
+      const lanternBody = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.14, 0.38, 6), frontWinGlassMat);
+      lanternBody.position.set(dx + side * 0.42, 2.42, frontWallZ + dirZ * (wallT / 2 + 0.42));
+      frontWallGroup.add(lanternBody);
+    }
+
+    // 正門石砌迎賓踏階 (Entrance Threshold Steps)
+    for (let st = 0; st < 2; st++) {
+      const stepMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(doorHalfGap * 2 + 0.8 + st * 0.4, 0.12, 0.65 + st * 0.45),
+        st === 0 ? lightStoneMat : frontStoneMat
+      );
+      stepMesh.position.set(0, 0.08 - st * 0.04, frontWallZ + dirZ * (0.65 + st * 0.25));
+      stepMesh.receiveShadow = true;
+      frontWallGroup.add(stepMesh);
+    }
+
+    // (2.4) 可旋轉 3D 中世紀鉚釘鐵件橡木大門 (軸心設於左側門框)
+    const doorPivot = new THREE.Group();
+    doorPivot.position.set(-doorHalfGap + 0.22, 0.15, frontWallZ);
+
+    const doorWidth = doorHalfGap * 2 - 0.44;
+    const doorHeight = wallH - 0.62;
+    const doorOakMat = new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.80 });
+    const doorTrimMat = new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 });
+
+    const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(doorWidth, doorHeight, 0.24), doorOakMat);
+    doorPanel.position.set(doorWidth / 2, doorHeight / 2, 0);
+    doorPanel.castShadow = true;
+    doorPivot.add(doorPanel);
+
+    // 門板垂直拼接浮雕木條、上下橫樑、Z 字斜撐與鑄鐵長鉸鏈
+    for (let pIdx = 1; pIdx <= 5; pIdx++) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.12, doorHeight - 0.2, 0.28), doorTrimMat);
+      strip.position.set((doorWidth / 6) * pIdx, doorHeight / 2, 0);
+      doorPivot.add(strip);
+    }
+    for (const ry of [0.35, doorHeight * 0.5, doorHeight - 0.35]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(doorWidth - 0.1, 0.24, 0.30), doorTrimMat);
+      rail.position.set(doorWidth / 2, ry, 0);
+      doorPivot.add(rail);
+    }
+    const zBrace = new THREE.Mesh(new THREE.BoxGeometry(doorWidth * 0.85, 0.20, 0.29), doorTrimMat);
+    zBrace.position.set(doorWidth / 2, doorHeight * 0.26, 0);
+    zBrace.rotation.z = 0.32;
+    doorPivot.add(zBrace);
+
+    for (const hy of [0.75, doorHeight - 0.75]) {
+      const strapHinge = new THREE.Mesh(new THREE.BoxGeometry(doorWidth * 0.45, 0.14, 0.34), ironMat);
+      strapHinge.position.set(doorWidth * 0.24, hy, 0);
+      doorPivot.add(strapHinge);
+    }
+
+    // 黃銅圓環門把
+    const doorRing = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.04, 8, 12), brassMat);
+    doorRing.position.set(doorWidth - 0.55, doorHeight * 0.48, dirZ * 0.18);
+    doorPivot.add(doorRing);
+
     // 門鎖橫栓 (反鎖時顯現發光紅鐵橫槓)
-    const doorWidth = doorHalfGap * 2;
     const lockBar = new THREE.Mesh(
-      new THREE.BoxGeometry(doorWidth + 0.5, 0.24, 0.42),
+      new THREE.BoxGeometry(doorWidth + 0.6, 0.26, 0.42),
       new THREE.MeshStandardMaterial({
         color: '#ef4444',
         emissive: '#dc2626',
@@ -940,12 +1185,135 @@ export class ThreeVillageRenderer {
         roughness: 0.3
       })
     );
-    lockBar.position.set(doorWidth / 2, 1.5, 0);
+    lockBar.position.set(doorWidth / 2, doorHeight * 0.52, 0);
     lockBar.visible = false;
     doorPivot.add(lockBar);
 
     frontWallGroup.add(doorPivot);
     group.add(frontWallGroup);
+
+    // (2.5) 可掀式多層次瓦片斜頂屋頂、山牆木桁架、外露飛椽與高聳磚石煙囪 (roofGroup)
+    const roofGroup = new THREE.Group();
+    roofGroup.position.y = wallH;
+
+    const roofPitchH = 3.85;
+    const roofOverhangX = W + 1.8;
+    const halfSpanZ = D / 2 + 1.25;
+    const slopeLen = Math.hypot(halfSpanZ, roofPitchH);
+    const slopeAngle = Math.atan2(roofPitchH, halfSpanZ);
+
+    // 屋頂底層結構斜板
+    const roofHalfFront = new THREE.Mesh(new THREE.BoxGeometry(roofOverhangX, 0.24, slopeLen), roofMatPrimary);
+    roofHalfFront.position.set(0, roofPitchH / 2 - 0.08, halfSpanZ / 2 - 0.15);
+    roofHalfFront.rotation.x = slopeAngle;
+    roofHalfFront.castShadow = true;
+    roofGroup.add(roofHalfFront);
+
+    const roofHalfBack = new THREE.Mesh(new THREE.BoxGeometry(roofOverhangX, 0.24, slopeLen), roofMatPrimary);
+    roofHalfBack.position.set(0, roofPitchH / 2 - 0.08, -(halfSpanZ / 2 - 0.15));
+    roofHalfBack.rotation.x = -slopeAngle;
+    roofHalfBack.castShadow = true;
+    roofGroup.add(roofHalfBack);
+
+    // 7 層階梯狀疊瓦 (3D Layered Shingle Courses)：營造精緻 Low-Poly 雙色屋瓦層次感！
+    const numCourses = 7;
+    const courseLen = (slopeLen / numCourses) * 1.12;
+    for (let cIdx = 0; cIdx < numCourses; cIdx++) {
+      const t = (cIdx + 0.5) / numCourses;
+      const cy = t * roofPitchH + 0.08;
+      const czOffset = (1 - t) * (halfSpanZ - 0.25);
+      const cMat = cIdx % 2 === 0 ? roofMatPrimary : roofMatSecondary;
+
+      const courseFront = new THREE.Mesh(new THREE.BoxGeometry(roofOverhangX + 0.12, 0.14, courseLen), cMat);
+      courseFront.position.set(0, cy, czOffset);
+      courseFront.rotation.x = slopeAngle + 0.04;
+      courseFront.castShadow = true;
+      roofGroup.add(courseFront);
+
+      const courseBack = new THREE.Mesh(new THREE.BoxGeometry(roofOverhangX + 0.12, 0.14, courseLen), cMat);
+      courseBack.position.set(0, cy, -czOffset);
+      courseBack.rotation.x = -(slopeAngle + 0.04);
+      courseBack.castShadow = true;
+      roofGroup.add(courseBack);
+    }
+
+    // 屋簷下方外露胡桃木飛椽 (Exposed Rafter Tails)
+    for (let rx = -W / 2 - 0.3; rx <= W / 2 + 0.3; rx += 2.2) {
+      for (const rzSign of [-1, 1]) {
+        const rafter = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, slopeLen + 0.35), timberMat);
+        rafter.position.set(rx, roofPitchH / 2 - 0.22, rzSign * (halfSpanZ / 2 - 0.1));
+        rafter.rotation.x = rzSign * slopeAngle;
+        roofGroup.add(rafter);
+      }
+    }
+
+    // 東西兩側實心三角山牆 (Triangular Gable Walls) 與中王柱木桁架 (King-Post Truss)
+    const gableGeo = new THREE.BufferGeometry();
+    const gh = roofPitchH - 0.05;
+    const gw = D / 2;
+    const gableVerts = new Float32Array([
+      0, 0, -gw,   0, 0, gw,    0, gh, 0,
+      0, 0, gw,    0, 0, -gw,   0, gh, 0
+    ]);
+    gableGeo.setAttribute('position', new THREE.BufferAttribute(gableVerts, 3));
+    gableGeo.computeVertexNormals();
+
+    for (const gx of [leftWallX, rightWallX]) {
+      const gableMesh = new THREE.Mesh(gableGeo, plasterMat);
+      gableMesh.position.set(gx, 0, 0);
+      gableMesh.castShadow = true;
+      roofGroup.add(gableMesh);
+
+      // 山牆中央垂直王柱 (King Post) 與水平領樑 (Collar Beam)
+      const kingPost = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.22, roofPitchH, 0.32), timberMat);
+      kingPost.position.set(gx, roofPitchH / 2, 0);
+      roofGroup.add(kingPost);
+
+      const collarBeam = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.20, 0.26, D * 0.56), timberMat);
+      collarBeam.position.set(gx, roofPitchH * 0.45, 0);
+      roofGroup.add(collarBeam);
+
+      // 山牆閣樓圓拱通風花窗
+      const atticVent = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, wallT + 0.26, 8), winGlassMat);
+      atticVent.rotation.z = Math.PI / 2;
+      atticVent.position.set(gx, roofPitchH * 0.45, 0);
+      roofGroup.add(atticVent);
+    }
+
+    // 厚重屋脊主樑與東西兩端雕花屋脊尖飾柱 (Gable Finials)
+    const ridgeBeam = new THREE.Mesh(new THREE.BoxGeometry(roofOverhangX + 0.4, 0.42, 0.48), timberMat);
+    ridgeBeam.position.set(0, roofPitchH + 0.08, 0);
+    roofGroup.add(ridgeBeam);
+
+    for (const fx of [-(roofOverhangX / 2), roofOverhangX / 2]) {
+      const finialSpike = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.95, 6), timberMat);
+      finialSpike.position.set(fx, roofPitchH + 0.65, 0);
+      roofGroup.add(finialSpike);
+    }
+
+    // 高聳石砌與紅磚壓頂煙囪 (Chimney Stack & Terracotta Pots)
+    const chimneyZ = -dirZ * 4.85;
+    const chimneyShaft = new THREE.Mesh(new THREE.BoxGeometry(1.65, 3.2, 1.55), stoneMat);
+    chimneyShaft.position.set(0, roofPitchH * 0.58, chimneyZ);
+    chimneyShaft.castShadow = true;
+    roofGroup.add(chimneyShaft);
+
+    const chimneyCrown = new THREE.Mesh(
+      new THREE.BoxGeometry(1.92, 0.32, 1.82),
+      new THREE.MeshStandardMaterial({ color: '#7f1d1d', roughness: 0.85 })
+    );
+    chimneyCrown.position.set(0, roofPitchH * 0.58 + 1.65, chimneyZ);
+    roofGroup.add(chimneyCrown);
+
+    for (const px of [-0.42, 0.42]) {
+      const pot = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.26, 0.55, 8),
+        new THREE.MeshStandardMaterial({ color: '#9a3412', roughness: 0.8 })
+      );
+      pot.position.set(px, roofPitchH * 0.58 + 2.02, chimneyZ);
+      roofGroup.add(pot);
+    }
+
     group.add(roofGroup);
 
     // 3. 室內三大核心高細節家具區 (100% 對應 map-data.ts 的室內家具碰撞箱座標！)
