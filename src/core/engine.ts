@@ -11,7 +11,7 @@ import { GamePhase, GameStateSnapshot, PlayerId, RoleType } from './types';
 export class GameEngine {
   public fsm: GameStateMachine;
   public map: VillageMap;
-  private readonly playerRadius: number = 18;
+  private readonly playerRadius: number = 12;
 
   constructor(hostId: PlayerId, map: VillageMap = VILLAGE_MAP) {
     this.fsm = new GameStateMachine(hostId);
@@ -148,23 +148,21 @@ export class GameEngine {
         const doorCenterY = cottage.doorRect.y + cottage.doorRect.height / 2;
         const distToDoor = Math.hypot(player.x - doorCenterX, player.y - doorCenterY);
 
-        if (distToDoor < 45) {
+        if (distToDoor < 55 || !isOwner) {
           const isNorth = cottage.rect.y < 400;
-          player.y = isNorth ? cottage.doorRect.y + cottage.doorRect.height + 25 : cottage.doorRect.y - 25;
+          player.y = isNorth ? cottage.doorRect.y + cottage.doorRect.height + 28 : cottage.doorRect.y - 28;
           player.x = doorCenterX;
           player.insideCottageId = null;
           this.fsm.updatePlayer(player);
           return { success: true, message: `你走出了 ${cottage.name}。` };
-        } else if (isOwner) {
+        } else {
           cottage.isLocked = !cottage.isLocked;
           return {
             success: true,
             message: cottage.isLocked
-              ? `🔒 你已將 ${cottage.name} 緊緊反鎖！今晚狼人無法闖入破壞。`
-              : `🔓 你打開了 ${cottage.name} 的門鎖。`
+              ? `🔒 你已將 ${cottage.name} 緊緊反鎖！今晚狼人無法闖入破壞。(靠近門口按 [E] 或直接往外走即可離開)`
+              : `🔓 你打開了 ${cottage.name} 的門鎖。(靠近門口按 [E] 或直接往外走即可離開)`
           };
-        } else {
-          return { success: false, message: `你身在 ${cottage.name} 室內，靠近門口即可按 [E] 離開。` };
         }
       }
     }
@@ -175,7 +173,7 @@ export class GameEngine {
       const doorCenterY = cottage.doorRect.y + cottage.doorRect.height / 2;
       const distToDoor = Math.hypot(player.x - doorCenterX, player.y - doorCenterY);
 
-      if (distToDoor < 55) {
+      if (distToDoor < 75) {
         const isOwner = player.assignedCottageId === cottage.id;
         if (cottage.isLocked && !isOwner) {
           return { success: false, message: `🔒 房門已從內部鎖上，你不是這間木屋的主人，無法進入！` };

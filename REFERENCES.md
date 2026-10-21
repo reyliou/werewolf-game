@@ -18,6 +18,7 @@
 
 | 資產名稱 | 類型 | 授權協議 | 作者 / 出處 | 備註 |
 | :--- | :--- | :--- | :--- | :--- |
+| **Medieval People 3D Character Pack (User Uploaded)** | 3D Low-Poly 中世紀村民與王族角色模型 (FBX 轉 GLB) | 使用者授權素材 (CraftPix Royalty-Free License) | https://craftpix.net/file-licenses/ | 透過 Blender 5.2 將 T-Pose 骨架調整為自然放鬆站姿、底部歸零 (`min_z=0`) 並內嵌烘焙 `people_texture_map.png` 貼圖為 14 份 `.glb` 角色模型 (`peasant_1~6`, `city_dwellers_1~2`, `rich_citizens_1~4`, `king`, `queen`) |
 | **Simple Nature Pack (User Uploaded)** | 3D Low-Poly 自然環境物件 (FBX 轉 GLB) | 使用者授權素材 (Royalty-Free / CC) | 上傳壓縮包解壓縮 | 透過 Blender 5.2 移除重疊 `LOD1` 破圖網格、歸零地面高度 (`min_z=0`) 並內嵌烘焙 `SimpleNature_Texture_01.png` 貼圖為 24 份 `.glb` 自然模型 (樹木/岩石/灌木/花草/蘑菇) |
 | **LowPoly_Farm_02.blend** | 3D Low-Poly 農莊村莊模型庫 (本機萃取) | 使用者授權素材 (CC / Royalty-Free) | `c:\Users\reyliou\Downloads\LowPoly_Farm_02.blend` | 透過 Blender 5.2 修復遺失的 `color_1024x1024.jpg` 調色盤、按 UV 島座標自動重建 Principled BSDF 實體材質與夜窗發光、底部對齊地面 (`min_z=0`)，導出 13 份 `.glb` (`house_01~04.glb`, `barn.glb`, `watchtower.glb`, `bonfire.glb`, `bench.glb`, `barrel.glb`, `crate.glb`, `cart.glb`, `streetlight.glb`, `wheat_crop.glb`) |
 | **Kenney Fantasy Town Kit** | 3D Low-Poly 模組化村莊與小屋 (glTF/GLB) | CC0 1.0 Universal (Public Domain) | Kenney (https://kenney.nl/assets/fantasy-town-kit) | 160+ 個中世紀房屋、屋頂、門窗、農作物與圍欄 |

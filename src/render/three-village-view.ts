@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VillageMap } from '../core/map-data';
-import { GamePhase, GameStateSnapshot, PlayerId, PlayerState } from '../core/types';
+import { GamePhase, GameStateSnapshot, PlayerId, PlayerState, RoleType } from '../core/types';
 
 export class ThreeVillageRenderer {
   public scene: THREE.Scene;
@@ -20,8 +20,9 @@ export class ThreeVillageRenderer {
   private bonfireLight: THREE.PointLight;
   private playerLantern: THREE.PointLight;
 
-  // 3D 玩家網格快取
+  // 3D 玩家網格快取與木屋網格快取
   private playerMeshes: Map<PlayerId, THREE.Group> = new Map();
+  private cottageMeshes: Map<string, THREE.Group> = new Map();
 
   // GLB 模型原型快取
   private modelPrototypes: Map<string, THREE.Group> = new Map();
@@ -110,22 +111,22 @@ export class ThreeVillageRenderer {
    * 為所有建築、農田、廣場與營地建立 100% 平坦的台地 (Flat Terraces)，徹底消除建築卡進土裡或斜坡穿模問題！
    */
   public getTerrainHeight(x: number, z: number): number {
-    // 定義平坦台地清單 (cx, cz, 內部完全平坦半徑 rFlat, 外圍平滑過渡半徑 rBlend, 台地目標高度 targetY)
+    // 定義平坦台地清單 (cx, cz 與 map-data.ts 的 2D 碰撞牆中心 100% 對齊！)
     const flatPads: Array<{ cx: number; cz: number; rFlat: number; rBlend: number; targetY: number }> = [
       // 中央火堆議事大廣場
       { cx: 0, cz: 0, rFlat: 18.0, rBlend: 26.0, targetY: 0.0 },
-      // 1號木屋 (西北紅瓦屋)
-      { cx: -55.0, cz: -46.2, rFlat: 13.5, rBlend: 20.0, targetY: 0.8 },
-      // 2號木屋與預言家觀星高地 (北側藍瓦屋 + 瞭望塔 + 巨石陣)
-      { cx: -12.0, cz: -47.0, rFlat: 19.5, rBlend: 27.0, targetY: 2.2 },
-      // 3號木屋 (東北金麥屋)
-      { cx: 39.6, cz: -46.2, rFlat: 13.5, rBlend: 20.0, targetY: 1.2 },
-      // 4號木屋 (西南松林屋)
-      { cx: -55.0, cz: 33.0, rFlat: 13.5, rBlend: 20.0, targetY: 0.6 },
-      // 5號木屋與獵人哨站 (南側木屋 + 獵人營地)
-      { cx: -10.0, cz: 34.0, rFlat: 17.5, rBlend: 24.0, targetY: 0.8 },
-      // 6號木屋 (東南黑森林邊境屋)
-      { cx: 39.6, cz: 33.0, rFlat: 13.5, rBlend: 20.0, targetY: 1.0 },
+      // 1號木屋 (西北紅瓦屋: 2D 中心 270, 140 -> 3D -47.3, -39.6)
+      { cx: -47.3, cz: -39.6, rFlat: 13.5, rBlend: 20.0, targetY: 0.8 },
+      // 2號木屋與預言家觀星高地 (北側藍瓦屋: 2D 中心 700, 140 -> 3D 0.0, -39.6)
+      { cx: -6.0, cz: -43.0, rFlat: 21.0, rBlend: 28.0, targetY: 2.0 },
+      // 3號木屋 (東北金麥屋: 2D 中心 1130, 140 -> 3D +47.3, -39.6)
+      { cx: 47.3, cz: -39.6, rFlat: 13.5, rBlend: 20.0, targetY: 1.2 },
+      // 4號木屋 (西南松林屋: 2D 中心 270, 860 -> 3D -47.3, +39.6)
+      { cx: -47.3, cz: 39.6, rFlat: 13.5, rBlend: 20.0, targetY: 0.6 },
+      // 5號木屋與獵人哨站 (南側木屋: 2D 中心 700, 860 -> 3D 0.0, +39.6)
+      { cx: -4.0, cz: 38.0, rFlat: 18.5, rBlend: 25.0, targetY: 0.8 },
+      // 6號木屋 (東南黑森林邊境屋: 2D 中心 1130, 860 -> 3D +47.3, +39.6)
+      { cx: 47.3, cz: 39.6, rFlat: 13.5, rBlend: 20.0, targetY: 1.0 },
       // 東側狼人秘密肉品燻房空地
       { cx: 52.0, cz: 5.0, rFlat: 12.5, rBlend: 18.5, targetY: 0.6 }
     ];
@@ -310,13 +311,12 @@ export class ThreeVillageRenderer {
 
     // 主幹道與通往 6 間木屋、穀倉、肉架的分支步道
     drawRoad(-68, -2, 52, 5, 5.2);        // 東西向橫貫主幹道 (大穀倉 <-> 中央廣場 <-> 東側狼人肉架)
-    drawRoad(-7.7, -46.2, -7.7, 33, 5.0); // 南北向縱貫主幹道 (預言家2號屋 <-> 中央廣場 <-> 獵人5號屋)
-    drawRoad(0, 0, -7.7, 0, 6.0);         // 中央廣場銜接段
-    drawRoad(-42, -2, -55, -46.2, 4.0);   // 通往 1號木屋 (西北)
-    drawRoad(-7.7, -46.2, -21, -48, 3.6); // 通往北側觀星瞭望塔
-    drawRoad(18, 2, 39.6, -46.2, 4.0);    // 通往 3號木屋 (東北)
-    drawRoad(-42, 2, -55, 33, 4.0);       // 通往 4號木屋 (西南)
-    drawRoad(18, 2, 39.6, 33, 4.0);       // 通往 6號木屋 (東南)
+    drawRoad(0, -39.6, 0, 39.6, 5.0);     // 南北向縱貫主幹道 (預言家2號屋 <-> 中央廣場 <-> 獵人5號屋)
+    drawRoad(-42, -2, -47.3, -39.6, 4.2); // 通往 1號木屋 (西北)
+    drawRoad(0, -39.6, -21, -48, 3.6);    // 通往北側觀星瞭望塔
+    drawRoad(18, 2, 47.3, -39.6, 4.2);    // 通往 3號木屋 (東北)
+    drawRoad(-42, 2, -47.3, 39.6, 4.2);   // 通往 4號木屋 (西南)
+    drawRoad(18, 2, 47.3, 39.6, 4.2);     // 通往 6號木屋 (東南)
 
     // 7. 繪製各棟建築底下的石砌/夯土庭院圓盤 (Courtyard Pads)
     const drawCourtyard = (wx: number, wz: number, radiusMeters: number, innerHex: string = '#8c7a65') => {
@@ -333,13 +333,13 @@ export class ThreeVillageRenderer {
       ctx.fill();
     };
 
-    drawCourtyard(-55, -46.2, 11.5);
-    drawCourtyard(-7.7, -46.2, 11.5);
+    drawCourtyard(-47.3, -39.6, 11.5);
+    drawCourtyard(0.0, -39.6, 11.5);
     drawCourtyard(-21, -48, 6.5);
-    drawCourtyard(39.6, -46.2, 11.5);
-    drawCourtyard(-55, 33, 11.5);
-    drawCourtyard(-7.7, 33, 11.5);
-    drawCourtyard(39.6, 33, 11.5);
+    drawCourtyard(47.3, -39.6, 11.5);
+    drawCourtyard(-47.3, 39.6, 11.5);
+    drawCourtyard(0.0, 39.6, 11.5);
+    drawCourtyard(47.3, 39.6, 11.5);
     drawCourtyard(-68, -2, 12.0);
     drawCourtyard(52, 5, 9.5, '#6e553e');
 
@@ -496,7 +496,14 @@ export class ThreeVillageRenderer {
       mushroom2: '/assets/models/nature/mushroom_02.glb',
       // 砍伐樹樁與枯木
       stump1: '/assets/models/nature/stump_01.glb',
-      branch1: '/assets/models/nature/branch_01.glb'
+      branch1: '/assets/models/nature/branch_01.glb',
+      // 6 大中世紀 3D 村民角色模型 (已轉換為自然站姿並內嵌 people_texture_map.png)
+      char_villager: '/assets/models/characters/peasant_1.glb',
+      char_doctor: '/assets/models/characters/city_dwellers_1.glb',
+      char_hunter: '/assets/models/characters/peasant_3.glb',
+      char_seer: '/assets/models/characters/queen.glb',
+      char_trickster: '/assets/models/characters/rich_citizens_1.glb',
+      char_werewolf_human: '/assets/models/characters/king.glb'
     };
 
     const loadPromises = Object.entries(modelPaths).map(([key, url]) => {
@@ -534,8 +541,14 @@ export class ThreeVillageRenderer {
 
     await Promise.all(loadPromises);
     this.isModelsLoaded = true;
+    // 清除載入前暫存的幾何角色，讓下一幀立即換上真實 3D 角色模型
+    for (const group of this.playerMeshes.values()) {
+      this.scene.remove(group);
+    }
+    this.playerMeshes.clear();
+
     this.populateVillageDecorations();
-    console.log('✅ 所有 3D Low-Poly 村莊模型 (含完整 PBR 材質與無破圖 LOD0 網格) 加載完成！');
+    console.log('✅ 所有 3D Low-Poly 村莊與 6 大中世紀角色模型加載完成！');
   }
 
   /**
@@ -566,40 +579,43 @@ export class ThreeVillageRenderer {
       this.spawnModel('streetlight', lc.x, this.getTerrainHeight(lc.x, lc.z), lc.z, 2.4, lc.rot);
     }
 
-    // 2. 6 間村民專屬小屋 (加設 3D 石砌地基平台 + 平坦台地，100% 杜絕建築卡進土裡)
+    // 2. 6 間村民專屬小屋 (座標與 map-data.ts 的 2D 碰撞牆中心 100% 精準對齊，徹底消除空氣牆錯位！)
     const cottageSpecs = [
-      { key: 'house1', x: -55, z: -46.2, scale: 0.82, rot: 0, padW: 15.6, padD: 13.2 },
-      { key: 'house2', x: -7.7, z: -46.2, scale: 0.85, rot: 0, padW: 16.0, padD: 8.6 },
-      { key: 'house3', x: 39.6, z: -46.2, scale: 0.95, rot: 0, padW: 14.4, padD: 13.4 },
-      { key: 'house4', x: -55, z: 33, scale: 1.05, rot: Math.PI, padW: 12.0, padD: 13.0 },
-      { key: 'house3', x: -7.7, z: 33, scale: 0.95, rot: Math.PI, padW: 14.4, padD: 13.4 },
-      { key: 'house2', x: 39.6, z: 33, scale: 0.85, rot: Math.PI, padW: 16.0, padD: 8.6 }
+      { id: 'cottage-1', key: 'house1', x: -47.3, z: -39.6, scale: 0.82, rot: 0, padW: 15.4, padD: 13.2 },
+      { id: 'cottage-2', key: 'house2', x: 0.0, z: -39.6, scale: 0.85, rot: 0, padW: 15.6, padD: 8.6 },
+      { id: 'cottage-3', key: 'house3', x: 47.3, z: -39.6, scale: 0.95, rot: 0, padW: 14.4, padD: 13.2 },
+      { id: 'cottage-4', key: 'house4', x: -47.3, z: 39.6, scale: 1.05, rot: Math.PI, padW: 12.2, padD: 13.0 },
+      { id: 'cottage-5', key: 'house3', x: 0.0, z: 39.6, scale: 0.95, rot: Math.PI, padW: 14.4, padD: 13.2 },
+      { id: 'cottage-6', key: 'house2', x: 47.3, z: 39.6, scale: 0.85, rot: Math.PI, padW: 15.6, padD: 8.6 }
     ];
 
     for (const c of cottageSpecs) {
       const cy = this.getTerrainHeight(c.x, c.z);
       this.spawnStoneFoundation(c.x, cy, c.z, c.padW, c.padD, c.rot);
-      this.spawnModel(c.key, c.x, cy + 0.16, c.z, c.scale, c.rot);
+      const houseGroup = this.spawnModel(c.key, c.x, cy + 0.16, c.z, c.scale, c.rot);
+      if (houseGroup) {
+        this.cottageMeshes.set(c.id, houseGroup);
+      }
     }
 
     // 3. 北側占星高地 (預言家聖域)：高聳觀星木塔、巨石陣與發光蘑菇群
-    const towerY = this.getTerrainHeight(-21, -48);
-    this.spawnStoneFoundation(-21, towerY, -48, 4.2, 4.2, 0.3);
-    this.spawnModel('watchtower', -21, towerY + 0.16, -48, 0.95, 0.3);
+    const towerY = this.getTerrainHeight(-18, -46);
+    this.spawnStoneFoundation(-18, towerY, -46, 4.2, 4.2, 0.3);
+    this.spawnModel('watchtower', -18, towerY + 0.16, -46, 0.95, 0.3);
 
     const stoneRingRadius = 10.5;
     const stoneKeys = ['rock1', 'rock4', 'rock5'];
     for (let i = 0; i < 7; i++) {
       const angle = (i * Math.PI * 2) / 7;
-      const rx = -7.7 + Math.cos(angle) * stoneRingRadius;
-      const rz = -46.2 + Math.sin(angle) * (stoneRingRadius * 0.85);
+      const rx = 0.0 + Math.cos(angle) * stoneRingRadius;
+      const rz = -39.6 + Math.sin(angle) * (stoneRingRadius * 0.85);
       const ry = this.getTerrainHeight(rx, rz);
       const key = stoneKeys[i % stoneKeys.length];
       this.spawnModel(key, rx, ry, rz, 1.8 + (i % 2) * 0.4, angle);
     }
     for (let m = 0; m < 6; m++) {
-      const mx = -7.7 + (m - 2.5) * 2.5;
-      const mz = -56 + Math.sin(m) * 1.8;
+      const mx = 0.0 + (m - 2.5) * 2.5;
+      const mz = -51 + Math.sin(m) * 1.8;
       const my = this.getTerrainHeight(mx, mz);
       this.spawnModel(m % 2 === 0 ? 'mushroom1' : 'mushroom2', mx, my, mz, 2.8, Math.random() * Math.PI);
     }
@@ -630,10 +646,10 @@ export class ThreeVillageRenderer {
     for (let fx = 30; fx <= 76; fx += 9) {
       for (let fz = -44; fz <= 44; fz += 9.5) {
         const distToLair = Math.sqrt((fx - 52) ** 2 + (fz - 5) ** 2);
-        const distToHouse3 = Math.sqrt((fx - 39.6) ** 2 + (fz - (-46.2)) ** 2);
-        const distToHouse6 = Math.sqrt((fx - 39.6) ** 2 + (fz - 33) ** 2);
+        const distToHouse3 = Math.sqrt((fx - 47.3) ** 2 + (fz - (-39.6)) ** 2);
+        const distToHouse6 = Math.sqrt((fx - 47.3) ** 2 + (fz - 39.6) ** 2);
 
-        if (distToLair > 9 && distToHouse3 > 13 && distToHouse6 > 13) {
+        if (distToLair > 9 && distToHouse3 > 14 && distToHouse6 > 14) {
           const ox = fx + Math.sin(fz * 1.3) * 2.5;
           const oz = fz + Math.cos(fx * 1.3) * 2.5;
           const oy = this.getTerrainHeight(ox, oz);
@@ -799,6 +815,24 @@ export class ThreeVillageRenderer {
       // 夜晚點亮隨身提燈 (緊隨玩家身側)
       this.playerLantern.position.set(targetX, groundY + 2.2, targetZ);
       this.playerLantern.intensity = snapshot.phase === GamePhase.NIGHT ? 1.8 : 0;
+
+      // 當本地玩家進入某間木屋時，將該棟木屋設為半透明透視，方便看清室內角色與門鎖操作
+      for (const [cid, houseGroup] of this.cottageMeshes.entries()) {
+        const isInsideThis = localPlayer.insideCottageId === cid;
+        houseGroup.traverse((node) => {
+          if ((node as THREE.Mesh).isMesh) {
+            const mesh = node as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const m of mats) {
+              if (m) {
+                m.transparent = isInsideThis;
+                m.opacity = isInsideThis ? 0.28 : 1.0;
+                m.needsUpdate = true;
+              }
+            }
+          }
+        });
+      }
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -893,12 +927,14 @@ export class ThreeVillageRenderer {
       // 旋轉角度 (面向滑鼠/移動方向)
       group.rotation.y = -p.rotation + Math.PI / 2;
 
-      // 走動微幅起伏 (Bobbing) 與貼地高度
-      const isMoving = Math.abs(group.position.x - tx) > 0.05 || Math.abs(group.position.z - tz) > 0.05;
+      // 走動輕快步伐擺動 (Bobbing + Sway) 與貼地高度
+      const isMoving = Math.abs(group.position.x - tx) > 0.04 || Math.abs(group.position.z - tz) > 0.04;
       if (isMoving) {
-        group.position.y = groundY + Math.abs(Math.sin(this.animTime * 14)) * 0.18;
+        group.position.y = groundY + Math.abs(Math.sin(this.animTime * 14)) * 0.2;
+        group.rotation.z = Math.sin(this.animTime * 14) * 0.07;
       } else {
         group.position.y = groundY;
+        group.rotation.z = 0;
       }
 
       // 狼人變身狀態更新
@@ -921,42 +957,45 @@ export class ThreeVillageRenderer {
   }
 
   /**
-   * 建立單一角色的 3D 複合幾何模型 (人型 + 巨狼型態 + 護盾)
+   * 建立單一角色的 3D 複合模型 (優先套用上傳的 6 大中世紀 3D 人物 GLB 模型 + 巨狼變身形態 + 護盾)
    */
   private createPlayerCharacterGroup(p: PlayerState, isLocal: boolean): THREE.Group {
     const group = new THREE.Group();
 
-    // 1. 人類形態 (精緻 Low-Poly 黏土小人)
+    // 1. 人類形態：依據角色職業或小屋編號選取專屬中世紀 3D 人物模型
     const humanGroup = new THREE.Group();
     humanGroup.name = 'humanBody';
 
-    // 身體軀幹
-    const bodyGeo = new THREE.CylinderGeometry(0.55, 0.7, 1.2, 7);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: p.color || '#3b82f6',
-      flatShading: true,
-      roughness: 0.5
-    });
-    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    bodyMesh.position.y = 0.6;
-    bodyMesh.castShadow = true;
-    humanGroup.add(bodyMesh);
+    const roleToCharKey: Record<RoleType, string> = {
+      [RoleType.VILLAGER]: 'char_villager',
+      [RoleType.DOCTOR]: 'char_doctor',
+      [RoleType.HUNTER]: 'char_hunter',
+      [RoleType.SEER]: 'char_seer',
+      [RoleType.TRICKSTER]: 'char_trickster',
+      [RoleType.WEREWOLF]: 'char_werewolf_human'
+    };
 
-    // 頭部
-    const headGeo = new THREE.DodecahedronGeometry(0.48, 1);
-    const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', flatShading: true, roughness: 0.6 });
-    const headMesh = new THREE.Mesh(headGeo, headMat);
-    headMesh.position.y = 1.45;
-    headMesh.castShadow = true;
-    humanGroup.add(headMesh);
+    const charKey = roleToCharKey[p.role] || 'char_villager';
+    const charProto = this.modelPrototypes.get(charKey) || this.modelPrototypes.get('char_villager');
 
-    // 視線面罩/帽簷 (指示朝向)
-    const visorGeo = new THREE.ConeGeometry(0.2, 0.4, 4);
-    visorGeo.rotateX(-Math.PI / 2);
-    const visorMat = new THREE.MeshStandardMaterial({ color: '#1e293b' });
-    const visorMesh = new THREE.Mesh(visorGeo, visorMat);
-    visorMesh.position.set(0, 1.45, 0.45);
-    humanGroup.add(visorMesh);
+    if (charProto) {
+      const charClone = charProto.clone(true);
+      // 放大至 1.55 倍 (約 2.7m 視覺高度)，在俯角鏡頭下清晰呈現服裝與五官細節
+      charClone.scale.set(1.55, 1.55, 1.55);
+      humanGroup.add(charClone);
+    } else {
+      // GLB 尚未非同步載入完成前的幾毫秒過渡備援
+      const bodyGeo = new THREE.CylinderGeometry(0.55, 0.7, 1.2, 7);
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: p.color || '#3b82f6',
+        flatShading: true,
+        roughness: 0.5
+      });
+      const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+      bodyMesh.position.y = 0.6;
+      bodyMesh.castShadow = true;
+      humanGroup.add(bodyMesh);
+    }
 
     group.add(humanGroup);
 
