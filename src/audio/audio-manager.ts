@@ -27,21 +27,31 @@ export class AudioManager {
   }
 
   public async preloadAll(): Promise<void> {
-    const soundFiles = ['bell', 'footstep', 'heartbeat', 'shield', 'kill'];
+    const soundFiles: Record<string, string> = {
+      bell: '/assets/audio/bell.ogg',
+      night: '/assets/audio/night.ogg',
+      campfire: '/assets/audio/campfire.ogg',
+      heartbeat: '/assets/audio/heartbeat.ogg',
+      footstep: '/assets/audio/footstep.wav',
+      door: '/assets/audio/door.wav',
+      shield: '/assets/audio/shield.wav',
+      wolf: '/assets/audio/wolf.ogg',
+      kill: '/assets/audio/kill.ogg'
+    };
     const ctx = this.ensureContext();
 
-    for (const name of soundFiles) {
+    for (const [key, url] of Object.entries(soundFiles)) {
       try {
-        const res = await fetch(`/assets/audio/${name}.wav`);
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const arrayBuffer = await res.arrayBuffer();
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-        this.audioBuffers.set(name, audioBuffer);
+        this.audioBuffers.set(key, audioBuffer);
       } catch (err) {
-        console.warn(`[AudioManager] 無法預載 ${name}.wav，將採用即時程序合成:`, err);
+        console.warn(`[AudioManager] 無法預載 ${url}:`, err);
       }
     }
-    console.log(`[AudioManager] 音效預加載完成 (${this.audioBuffers.size}/${soundFiles.length} 已快取)`);
+    console.log(`[AudioManager] 網路真實開源音效預加載完成 (${this.audioBuffers.size} 項已快取)`);
   }
 
   private playBuffer(name: string, volume: number = 1.0): void {
@@ -92,14 +102,22 @@ export class AudioManager {
 
   public playFootstep(): void {
     const now = performance.now();
-    if (now - this.lastFootstepTime > 260) {
+    if (now - this.lastFootstepTime > 320) {
       this.lastFootstepTime = now;
-      this.playBuffer('footstep', 0.45);
+      this.playBuffer('footstep', 0.25);
     }
   }
 
   public playBell(): void {
-    this.playBuffer('bell', 0.9);
+    this.playBuffer('bell', 0.75);
+  }
+
+  public playDoor(): void {
+    this.playBuffer('door', 0.85);
+  }
+
+  public playWolfGrowl(): void {
+    this.playBuffer('wolf', 0.9);
   }
 
   public playShieldShatter(): void {
@@ -107,7 +125,7 @@ export class AudioManager {
   }
 
   public playKillStrike(): void {
-    this.playBuffer('kill', 1.0);
+    this.playBuffer('kill', 0.95);
   }
 
   public setHeartbeatActive(active: boolean): void {

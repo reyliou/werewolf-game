@@ -263,19 +263,26 @@ export class ThreeVillageRenderer {
   }
 
   /**
-   * 批次加載萃取好的 .glb 模型 (包含全套自然景觀與裝飾)
+   * 批次加載重新烘焙材質並消除 LOD 重疊破圖的 .glb 模型
    */
   private async loadAllGLBModels(): Promise<void> {
     const modelPaths: Record<string, string> = {
-      // 建築與設施
+      // 4 種不同風格的村民木屋與職業專屬建築
       house1: '/assets/models/house_01.glb',
       house2: '/assets/models/house_02.glb',
+      house3: '/assets/models/house_03.glb',
+      house4: '/assets/models/house_04.glb',
+      barn: '/assets/models/barn.glb',
+      watchtower: '/assets/models/watchtower.glb',
+      // 村莊設施與農具
       bonfire: '/assets/models/bonfire.glb',
       wheat: '/assets/models/wheat_crop.glb',
       bench: '/assets/models/bench.glb',
       crate: '/assets/models/crate.glb',
       barrel: '/assets/models/barrel.glb',
-      // 樹木森林
+      cart: '/assets/models/cart.glb',
+      streetlight: '/assets/models/streetlight.glb',
+      // 樹木森林 (已移除 LOD1 重疊破圖並內嵌完整貼圖)
       tree1: '/assets/models/nature/tree_01.glb',
       tree2: '/assets/models/nature/tree_02.glb',
       tree3: '/assets/models/nature/tree_03.glb',
@@ -310,8 +317,17 @@ export class ThreeVillageRenderer {
             const root = gltf.scene;
             root.traverse((node) => {
               if ((node as THREE.Mesh).isMesh) {
-                node.castShadow = true;
-                node.receiveShadow = true;
+                const mesh = node as THREE.Mesh;
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                // 確保雙面渲染與法線平滑，防止單面破圖
+                if (Array.isArray(mesh.material)) {
+                  mesh.material.forEach((m) => {
+                    m.side = THREE.DoubleSide;
+                  });
+                } else if (mesh.material) {
+                  mesh.material.side = THREE.DoubleSide;
+                }
               }
             });
             this.modelPrototypes.set(key, root);
@@ -329,138 +345,146 @@ export class ThreeVillageRenderer {
     await Promise.all(loadPromises);
     this.isModelsLoaded = true;
     this.populateVillageDecorations();
-    console.log('✅ 所有 3D Low-Poly 村莊模型加載並佈局完成！');
+    console.log('✅ 所有 3D Low-Poly 村莊模型 (含完整 PBR 材質與無破圖 LOD0 網格) 加載完成！');
   }
 
   /**
-   * 依據村莊藍圖將 3D 模型實體化擺放到起伏地形上 (結合職業場景、豐富自然植被與裝飾)
+   * 依據村莊藍圖將 3D 模型以正確真實比例擺放到起伏地形上
    */
   private populateVillageDecorations(): void {
-    // 1. 中央會議營火與 6 張石木長椅
+    // 1. 中央會議大營火 (真實比例放大至 2.6 倍，火焰與木材層次分明) 與 6 張圍坐長椅
     const fireY = this.getTerrainHeight(0, 0);
-    this.spawnModel('bonfire', 0, fireY, 0, 0.45);
+    this.spawnModel('bonfire', 0, fireY, 0, 2.6);
 
     for (let i = 0; i < 6; i++) {
       const angle = (i * Math.PI * 2) / 6;
-      const dist = 5.4;
+      const dist = 6.2;
       const bx = Math.cos(angle) * dist;
       const bz = Math.sin(angle) * dist;
       const by = this.getTerrainHeight(bx, bz);
-      this.spawnModel('bench', bx, by, bz, 0.8, -angle + Math.PI / 2);
+      this.spawnModel('bench', bx, by, bz, 2.2, -angle + Math.PI / 2);
     }
 
-    // 火堆周圍散落鵝卵石
-    this.spawnModel('rock1', 3.2, this.getTerrainHeight(3.2, 2.5), 2.5, 0.4);
-    this.spawnModel('rock2', -3.0, this.getTerrainHeight(-3.0, -2.8), -2.8, 0.45);
-    this.spawnModel('rock1', -2.8, this.getTerrainHeight(-2.8, 3.1), 3.1, 0.38);
+    // 廣場四周立起 4 座中古世紀鐵藝街燈
+    const lampCoords = [
+      { x: -10, z: -10, rot: Math.PI / 4 },
+      { x: 10, z: -10, rot: -Math.PI / 4 },
+      { x: -10, z: 10, rot: (Math.PI * 3) / 4 },
+      { x: 10, z: 10, rot: -(Math.PI * 3) / 4 }
+    ];
+    for (const lc of lampCoords) {
+      this.spawnModel('streetlight', lc.x, this.getTerrainHeight(lc.x, lc.z), lc.z, 2.4, lc.rot);
+    }
 
-    // 2. 6 間村民小屋 (位置與 2D 碰撞盒緊密匹配，並各自依高度落座)
+    // 2. 6 間村民專屬小屋 (採用 4 種不同屋頂色彩與結構，底部 min_z=0 完全貼合地面不陷落)
     const cottageSpecs = [
-      { key: 'house1', x: -55, z: -46.2, rot: 0.15, role: '亞歷山大小屋 (醫生/村民)' },
-      { key: 'house2', x: -7.7, z: -46.2, rot: 0, role: '艾蓮娜小屋 (預言家占星高地)' },
-      { key: 'house1', x: 39.6, z: -46.2, rot: -0.15, role: '萊昂小屋 (村民)' },
-      { key: 'house2', x: -55, z: 33, rot: 3.14, role: '諾亞小屋 (農莊/小麥倉)' },
-      { key: 'house1', x: -7.7, z: 33, rot: 3.0, role: '卡爾小屋 (獵人哨站)' },
-      { key: 'house2', x: 39.6, z: 33, rot: -3.0, role: '洛基小屋 (黑森林狼影)' }
+      { key: 'house1', x: -55, z: -46.2, scale: 0.82, rot: 0, role: '1號木屋 (紅瓦白牆)' },
+      { key: 'house2', x: -7.7, z: -46.2, scale: 0.85, rot: 0, role: '2號木屋 (預言家藍瓦高地)' },
+      { key: 'house3', x: 39.6, z: -46.2, scale: 0.95, rot: 0, role: '3號木屋 (金麥茅草屋)' },
+      { key: 'house4', x: -55, z: 33, scale: 1.05, rot: Math.PI, role: '4號木屋 (松林綠頂屋)' },
+      { key: 'house3', x: -7.7, z: 33, scale: 0.95, rot: Math.PI, role: '5號木屋 (獵人哨站)' },
+      { key: 'house2', x: 39.6, z: 33, scale: 0.85, rot: Math.PI, role: '6號木屋 (黑森林邊境屋)' }
     ];
 
     for (const c of cottageSpecs) {
       const cy = this.getTerrainHeight(c.x, c.z);
-      this.spawnModel(c.key, c.x, cy, c.z, 0.88, c.rot);
+      this.spawnModel(c.key, c.x, cy, c.z, c.scale, c.rot);
     }
 
-    // 3. 北側占星高地 (預言家聖域)：巨石環、神秘蘑菇群與高山松
-    const stoneRingRadius = 9.5;
-    const stoneKeys = ['rock1', 'rock2', 'rock3', 'rock4', 'rock5'];
+    // 3. 北側占星高地 (預言家聖域)：高聳觀星木塔、巨石陣與發光蘑菇群
+    this.spawnModel('watchtower', -21, this.getTerrainHeight(-21, -48), -48, 0.95, 0.3);
+
+    const stoneRingRadius = 10.5;
+    const stoneKeys = ['rock1', 'rock4', 'rock5'];
     for (let i = 0; i < 7; i++) {
       const angle = (i * Math.PI * 2) / 7;
       const rx = -7.7 + Math.cos(angle) * stoneRingRadius;
-      const rz = -46.2 + Math.sin(angle) * (stoneRingRadius * 0.8);
+      const rz = -46.2 + Math.sin(angle) * (stoneRingRadius * 0.85);
       const ry = this.getTerrainHeight(rx, rz);
       const key = stoneKeys[i % stoneKeys.length];
-      this.spawnModel(key, rx, ry, rz, 0.75 + (i % 3) * 0.25, angle);
+      this.spawnModel(key, rx, ry, rz, 1.8 + (i % 2) * 0.4, angle);
     }
-    // 預言家聖域神秘發光蘑菇
-    for (let m = 0; m < 5; m++) {
-      const mx = -7.7 + (m - 2) * 2.2;
-      const mz = -54 + Math.sin(m) * 1.8;
+    for (let m = 0; m < 6; m++) {
+      const mx = -7.7 + (m - 2.5) * 2.5;
+      const mz = -56 + Math.sin(m) * 1.8;
       const my = this.getTerrainHeight(mx, mz);
-      this.spawnModel(m % 2 === 0 ? 'mushroom1' : 'mushroom2', mx, my, mz, 0.9, Math.random() * Math.PI);
+      this.spawnModel(m % 2 === 0 ? 'mushroom1' : 'mushroom2', mx, my, mz, 2.8, Math.random() * Math.PI);
     }
 
-    // 4. 西側金黃農田與穀倉 (村民小麥工作區)
-    for (let row = -24; row <= 24; row += 4.5) {
-      for (let col = -68; col <= -38; col += 4.2) {
-        // 避開西側木屋周邊
-        const distToCottage1 = Math.sqrt((col - (-55)) ** 2 + (row - (-46.2)) ** 2);
-        const distToCottage4 = Math.sqrt((col - (-55)) ** 2 + (row - 33) ** 2);
-        if (distToCottage1 > 14 && distToCottage4 > 14) {
-          const wx = col + Math.sin(row * 0.8) * 1.2;
-          const wz = row + Math.cos(col * 0.8) * 1.2;
-          const wy = this.getTerrainHeight(wx, wz);
-          this.spawnModel('wheat', wx, wy, wz, 0.65, Math.random() * Math.PI);
-        }
+    // 4. 西側金黃農莊大穀倉 (Barn)、運麥木車 (Cart) 與茂密小麥田
+    this.spawnModel('barn', -68, this.getTerrainHeight(-68, -2), -2, 0.78, Math.PI / 2);
+    this.spawnModel('cart', -42, this.getTerrainHeight(-42, -9), -9, 2.2, 0.4);
+    this.spawnModel('cart', -42, this.getTerrainHeight(-42, 11), 11, 2.2, -0.3);
+
+    for (let row = -20; row <= 20; row += 3.8) {
+      for (let col = -60; col <= -44; col += 3.8) {
+        const wx = col + Math.sin(row * 0.7) * 0.6;
+        const wz = row + Math.cos(col * 0.7) * 0.6;
+        const wy = this.getTerrainHeight(wx, wz);
+        this.spawnModel('wheat', wx, wy, wz, 2.3, (row + col) * 0.5);
       }
     }
-    // 農莊收穫木箱與酒桶堆
-    this.spawnModel('crate', -42, this.getTerrainHeight(-42, -5), -5, 0.9);
-    this.spawnModel('crate', -40, this.getTerrainHeight(-40, -7), -7, 0.95, 0.4);
-    this.spawnModel('barrel', -45, this.getTerrainHeight(-45, 6), 6, 0.9);
-    this.spawnModel('barrel', -44, this.getTerrainHeight(-44, 8), 8, 0.85);
-    this.spawnModel('stump1', -38, this.getTerrainHeight(-38, 2), 2, 0.8);
+    // 農莊收穫木箱與橡木桶堆
+    this.spawnModel('crate', -40, this.getTerrainHeight(-40, -4), -4, 1.6);
+    this.spawnModel('crate', -38.2, this.getTerrainHeight(-38.2, -5.5), -5.5, 1.5, 0.4);
+    this.spawnModel('barrel', -41, this.getTerrainHeight(-41, 5), 5, 1.8);
+    this.spawnModel('barrel', -39.5, this.getTerrainHeight(-39.5, 6.8), 6.8, 1.7);
 
     // 5. 東側深邃黑森林與狼人秘密肉品燻房
     const forestTreeKeys = ['tree1', 'tree2', 'tree3', 'tree4', 'tree5'];
-    for (let fx = 28; fx <= 74; fx += 8) {
-      for (let fz = -46; fz <= 46; fz += 9) {
+    for (let fx = 30; fx <= 76; fx += 9) {
+      for (let fz = -44; fz <= 44; fz += 9.5) {
         const distToLair = Math.sqrt((fx - 52) ** 2 + (fz - 5) ** 2);
-        // 狼人肉架空地中央保持微開闊，周圍環繞茂密暗林
-        if (distToLair > 7) {
-          const ox = fx + (Math.sin(fz) * 3);
-          const oz = fz + (Math.cos(fx) * 3);
-          const oy = this.getTerrainHeight(ox, oz);
-          const key = forestTreeKeys[Math.floor(Math.random() * forestTreeKeys.length)];
-          this.spawnModel(key, ox, oy, oz, 0.85 + Math.random() * 0.45, Math.random() * Math.PI);
+        const distToHouse3 = Math.sqrt((fx - 39.6) ** 2 + (fz - (-46.2)) ** 2);
+        const distToHouse6 = Math.sqrt((fx - 39.6) ** 2 + (fz - 33) ** 2);
 
-          // 森林地表隨機散落巨石、灌木與陰暗毒蘑菇
-          if (Math.random() > 0.65) {
-            this.spawnModel('rock2', ox + 2.5, this.getTerrainHeight(ox + 2.5, oz - 1.5), oz - 1.5, 0.6);
+        if (distToLair > 9 && distToHouse3 > 13 && distToHouse6 > 13) {
+          const ox = fx + Math.sin(fz * 1.3) * 2.5;
+          const oz = fz + Math.cos(fx * 1.3) * 2.5;
+          const oy = this.getTerrainHeight(ox, oz);
+          const key = forestTreeKeys[Math.abs(Math.floor(fx + fz)) % forestTreeKeys.length];
+          this.spawnModel(key, ox, oy, oz, 1.85 + (Math.abs(fx) % 3) * 0.25, (fx * fz) % Math.PI);
+
+          if ((fx + fz) % 3 === 0) {
+            this.spawnModel('rock4', ox + 2.8, this.getTerrainHeight(ox + 2.8, oz - 1.8), oz - 1.8, 1.5);
           }
-          if (Math.random() > 0.6) {
-            this.spawnModel('bush2', ox - 2, this.getTerrainHeight(ox - 2, oz + 2), oz + 2, 0.85);
-          }
-          if (Math.random() > 0.75) {
-            this.spawnModel('mushroom2', ox + 1.5, this.getTerrainHeight(ox + 1.5, oz + 1.8), oz + 1.8, 0.8);
+          if ((fx + fz) % 2 === 0) {
+            this.spawnModel('bush1', ox - 2.2, this.getTerrainHeight(ox - 2.2, oz + 2.0), oz + 2.0, 2.0);
           }
         }
       }
     }
-    // 狼人肉品燻架區域裝飾 (枯木、砍伐樁、生肉儲藏箱)
-    this.spawnModel('stump1', 52, this.getTerrainHeight(52, 5), 5, 1.1);
-    this.spawnModel('branch1', 55, this.getTerrainHeight(55, 7), 7, 1.0, 0.8);
-    this.spawnModel('crate', 48, this.getTerrainHeight(48, 4), 4, 0.95);
-    this.spawnModel('barrel', 49, this.getTerrainHeight(49, 7), 7, 0.9);
 
-    // 6. 南側獵人營地 (射擊伐木樁與木箱)
-    this.spawnModel('stump1', -7.7, this.getTerrainHeight(-7.7, 42), 42, 0.9);
-    this.spawnModel('branch1', -12, this.getTerrainHeight(-12, 40), 40, 0.9, 1.2);
-    this.spawnModel('crate', -4, this.getTerrainHeight(-4, 38), 38, 0.85);
+    // 狼人肉品燻架空地裝飾 (大型剁肉樹樁、枯木、儲肉木桶與毒蕈)
+    this.spawnModel('stump1', 52, this.getTerrainHeight(52, 3), 3, 2.4);
+    this.spawnModel('stump1', 55, this.getTerrainHeight(55, 8), 8, 2.1);
+    this.spawnModel('branch1', 54, this.getTerrainHeight(54, 5.5), 5.5, 2.5, 0.8);
+    this.spawnModel('crate', 48, this.getTerrainHeight(48, 2), 2, 1.7);
+    this.spawnModel('barrel', 49, this.getTerrainHeight(49, 6), 6, 1.9);
+    this.spawnModel('barrel', 50.8, this.getTerrainHeight(50.8, 7.2), 7.2, 1.8);
+    this.spawnModel('mushroom2', 53.5, this.getTerrainHeight(53.5, 1.2), 1.2, 3.0);
 
-    // 7. 村民主要通道兩旁花卉與灌木裝飾
-    for (let pz = -30; pz <= 30; pz += 6.5) {
-      if (Math.abs(pz) > 7) {
-        // 西南東南步道花卉
-        this.spawnModel('flowers1', -14, this.getTerrainHeight(-14, pz), pz, 0.75, Math.random());
-        this.spawnModel('flowers2', 14, this.getTerrainHeight(14, pz), pz, 0.75, Math.random());
-        this.spawnModel('bush1', -17, this.getTerrainHeight(-17, pz), pz, 0.7);
-        this.spawnModel('bush3', 17, this.getTerrainHeight(17, pz), pz, 0.7);
+    // 6. 南側獵人營地 (伐木樁、枯枝與木箱)
+    this.spawnModel('stump1', -18, this.getTerrainHeight(-18, 36), 36, 2.0);
+    this.spawnModel('branch1', -21, this.getTerrainHeight(-21, 34), 34, 2.2, 1.1);
+    this.spawnModel('crate', 4, this.getTerrainHeight(4, 36), 36, 1.6);
+
+    // 7. 村莊十字步道兩側花卉與灌木叢
+    for (let pz = -28; pz <= 26; pz += 7) {
+      if (Math.abs(pz) > 9) {
+        this.spawnModel('flowers1', -15, this.getTerrainHeight(-15, pz), pz, 2.8, pz);
+        this.spawnModel('flowers2', 15, this.getTerrainHeight(15, pz), pz, 2.8, -pz);
+        this.spawnModel('bush2', -18, this.getTerrainHeight(-18, pz + 2), pz + 2, 2.1);
+        this.spawnModel('bush3', 18, this.getTerrainHeight(18, pz + 2), pz + 2, 2.1);
       }
     }
 
-    // 8. 外圍全圖邊界護城森林山脈 (環繞全村)
-    for (let bx = -80; bx <= 80; bx += 10) {
-      this.spawnModel('tree1', bx, this.getTerrainHeight(bx, -62), -62, 1.2, Math.random());
-      this.spawnModel('tree2', bx, this.getTerrainHeight(bx, 62), 62, 1.2, Math.random());
+    // 8. 外圍全圖邊界護城高聳森林 (環繞全村山脊)
+    for (let bx = -84; bx <= 84; bx += 11) {
+      const tKey1 = forestTreeKeys[Math.abs(bx) % forestTreeKeys.length];
+      const tKey2 = forestTreeKeys[(Math.abs(bx) + 2) % forestTreeKeys.length];
+      this.spawnModel(tKey1, bx, this.getTerrainHeight(bx, -64), -64, 2.3, bx * 0.3);
+      this.spawnModel(tKey2, bx, this.getTerrainHeight(bx, 60), 60, 2.3, bx * 0.5);
     }
   }
 

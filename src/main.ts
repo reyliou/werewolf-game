@@ -261,7 +261,7 @@ function triggerInteractAction() {
       if (res.success) {
         if (res.message.includes('小麥')) soundManager.playFootstep();
         else if (res.message.includes('鮮肉')) soundManager.playKillStrike();
-        else if (res.message.includes('反鎖') || res.message.includes('避難')) soundManager.playShieldShatter();
+        else if (res.message.includes('木屋') || res.message.includes('門鎖') || res.message.includes('反鎖') || res.message.includes('避難')) soundManager.playDoor();
         else soundManager.playFootstep();
       }
     }
@@ -283,7 +283,11 @@ function triggerSkillAction() {
     if (res) {
       showToast(res.message);
       if (res.success && res.message.includes('狂暴巨狼')) {
+        soundManager.playWolfGrowl();
+      } else if (res.success && res.message.includes('撕碎')) {
         soundManager.playKillStrike();
+      } else if (res.success && res.message.includes('藥水') || res.message.includes('護盾')) {
+        soundManager.playShieldShatter();
       }
     }
   } else if (currentMode === 'CLIENT') {
