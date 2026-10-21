@@ -3,8 +3,8 @@
  * @description 核心狀態機與非對稱角色技能自動化驗證腳本（Node 24 原生 TS 執行，零測試套件贅肉）
  */
 
-import { GameEngine } from './engine.ts';
-import { PlayerState, RoleType } from './types.ts';
+import { GameEngine } from './engine';
+import { PlayerState, RoleType } from './types';
 
 function createMockPlayer(id: string, name: string, role: RoleType, x: number, y: number): PlayerState {
   return {
