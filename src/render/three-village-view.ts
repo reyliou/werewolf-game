@@ -5,14 +5,22 @@
 
 import * as THREE from 'three';
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { VillageMap } from '../core/map-data';
 import { GamePhase, GameStateSnapshot, PlayerId, PlayerState, RoleType } from '../core/types';
+import { CharacterMotionSystem } from './character-motion';
 
 export class ThreeVillageRenderer {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
   public renderer: THREE.WebGLRenderer;
   private gltfLoader: GLTFLoader;
+  public motionSystem: CharacterMotionSystem = new CharacterMotionSystem();
+
+  // 第一人稱視角狀態
+  public isFirstPerson: boolean = false;
+  public fpvYaw: number = Math.PI / 2;
+  public fpvPitch: number = -0.05;
 
   // 光源
   private sunLight: THREE.DirectionalLight;
@@ -541,14 +549,15 @@ export class ThreeVillageRenderer {
 
     await Promise.all(loadPromises);
     this.isModelsLoaded = true;
-    // 清除載入前暫存的幾何角色，讓下一幀立即換上真實 3D 角色模型
+    // 清除載入前暫存的幾何角色，讓下一幀立即換上真實 3D 角色模型與骨骼動畫
     for (const group of this.playerMeshes.values()) {
       this.scene.remove(group);
     }
     this.playerMeshes.clear();
+    this.motionSystem.clearAll();
 
     this.populateVillageDecorations();
-    console.log('✅ 所有 3D Low-Poly 村莊與 6 大中世紀角色模型加載完成！');
+    console.log('✅ 所有 3D Low-Poly 村莊與 6 大中世紀角色模型 (含 41 骨骼動作系統) 加載完成！');
   }
 
   /**
@@ -804,17 +813,48 @@ export class ThreeVillageRenderer {
     // 4. 更新與插值所有玩家 3D 角色 (緊貼起伏地表)
     this.updatePlayerMeshes(snapshot.players, localPlayerId, deltaSec);
 
-    // 5. 相機平滑跟隨本地玩家 (平滑 Lerp)
+    // 5. 相機跟隨本地玩家：支援「第三人稱俯視微縮視角」與「第一人稱沉浸視角 (FPV)」無縫切換
     if (localPlayer) {
       const { x: targetX, z: targetZ } = this.to3DCoords(localPlayer.x, localPlayer.y);
       const groundY = this.getTerrainHeight(targetX, targetZ);
-      const targetCamPos = new THREE.Vector3(targetX, groundY + 34, targetZ + 30);
-      this.camera.position.lerp(targetCamPos, 0.08);
-      this.camera.lookAt(targetX, groundY + 1.2, targetZ);
+
+      if (this.isFirstPerson) {
+        // 第一人稱視角 (FPV)：廣角 68 度、眼部高度 + 走動微幅呼吸晃動
+        if (Math.abs(this.camera.fov - 68) > 0.5) {
+          this.camera.fov = 68;
+          this.camera.updateProjectionMatrix();
+        }
+        const localGroup = this.playerMeshes.get(localPlayerId);
+        const camX = localGroup ? localGroup.position.x : targetX;
+        const camZ = localGroup ? localGroup.position.z : targetZ;
+        const camGroundY = this.getTerrainHeight(camX, camZ);
+        const isMoving = Math.abs(camX - targetX) > 0.03 || Math.abs(camZ - targetZ) > 0.03;
+        const headBob = isMoving ? Math.sin(this.animTime * 13) * 0.09 : Math.sin(this.animTime * 2.2) * 0.02;
+        const eyeHeight = localPlayer.isTransformed ? 2.65 : 2.38;
+
+        this.camera.position.set(camX, camGroundY + eyeHeight + headBob, camZ);
+
+        // 依據 fpvYaw 與 fpvPitch 計算視線前方目標點
+        const lookDist = 20;
+        const cosPitch = Math.cos(this.fpvPitch);
+        const lookX = camX + Math.cos(this.fpvYaw) * cosPitch * lookDist;
+        const lookZ = camZ + Math.sin(this.fpvYaw) * cosPitch * lookDist;
+        const lookY = (camGroundY + eyeHeight + headBob) + Math.sin(this.fpvPitch) * lookDist;
+        this.camera.lookAt(lookX, lookY, lookZ);
+      } else {
+        // 第三人稱斜 45 度俯視視角
+        if (Math.abs(this.camera.fov - 40) > 0.5) {
+          this.camera.fov = 40;
+          this.camera.updateProjectionMatrix();
+        }
+        const targetCamPos = new THREE.Vector3(targetX, groundY + 34, targetZ + 30);
+        this.camera.position.lerp(targetCamPos, 0.08);
+        this.camera.lookAt(targetX, groundY + 1.2, targetZ);
+      }
 
       // 夜晚點亮隨身提燈 (緊隨玩家身側)
       this.playerLantern.position.set(targetX, groundY + 2.2, targetZ);
-      this.playerLantern.intensity = snapshot.phase === GamePhase.NIGHT ? 1.8 : 0;
+      this.playerLantern.intensity = snapshot.phase === GamePhase.NIGHT ? (this.isFirstPerson ? 2.4 : 1.8) : 0;
 
       // 當本地玩家進入某間木屋時，將該棟木屋設為半透明透視，方便看清室內角色與門鎖操作
       for (const [cid, houseGroup] of this.cottageMeshes.entries()) {
@@ -826,7 +866,7 @@ export class ThreeVillageRenderer {
             for (const m of mats) {
               if (m) {
                 m.transparent = isInsideThis;
-                m.opacity = isInsideThis ? 0.28 : 1.0;
+                m.opacity = isInsideThis ? (this.isFirstPerson ? 0.55 : 0.28) : 1.0;
                 m.needsUpdate = true;
               }
             }
@@ -894,6 +934,7 @@ export class ThreeVillageRenderer {
       if (!players[id]) {
         this.scene.remove(group);
         this.playerMeshes.delete(id);
+        this.motionSystem.unregisterCharacter(id);
       }
     }
 
@@ -908,8 +949,13 @@ export class ThreeVillageRenderer {
         this.playerMeshes.set(id, group);
       }
 
+      // 第一人稱模式下隱藏本地玩家自身網格，避免頭部模型遮擋視線
+      group.visible = !(isLocal && this.isFirstPerson);
+
       // 座標插值平滑移動
       const { x: tx, z: tz } = this.to3DCoords(p.x, p.y);
+      const prevX = group.position.x;
+      const prevZ = group.position.z;
       group.position.x = THREE.MathUtils.lerp(group.position.x, tx, 0.25);
       group.position.z = THREE.MathUtils.lerp(group.position.z, tz, 0.25);
 
@@ -924,17 +970,21 @@ export class ThreeVillageRenderer {
         group.rotation.x = 0;
       }
 
-      // 旋轉角度 (面向滑鼠/移動方向)
-      group.rotation.y = -p.rotation + Math.PI / 2;
+      // 最短路徑平滑轉身 (解決原本角度突變或鎖定問題)
+      const targetRotY = -p.rotation + Math.PI / 2;
+      let diff = ((targetRotY - group.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      group.rotation.y += diff * Math.min(1, deltaSec * 14);
 
-      // 走動輕快步伐擺動 (Bobbing + Sway) 與貼地高度
-      const isMoving = Math.abs(group.position.x - tx) > 0.04 || Math.abs(group.position.z - tz) > 0.04;
+      // 判斷是否正在移動並更新 41 骨骼四肢邁步與呼吸系統
+      const moveDelta = Math.hypot(group.position.x - prevX, group.position.z - prevZ);
+      const isMoving = moveDelta > 0.008 || Math.hypot(group.position.x - tx, group.position.z - tz) > 0.04;
+      this.motionSystem.updateCharacter(id, isMoving, p.isTransformed, deltaSec, this.animTime);
+
       if (isMoving) {
-        group.position.y = groundY + Math.abs(Math.sin(this.animTime * 14)) * 0.2;
-        group.rotation.z = Math.sin(this.animTime * 14) * 0.07;
+        group.position.y = groundY + Math.abs(Math.sin(this.animTime * 12)) * 0.08;
       } else {
         group.position.y = groundY;
-        group.rotation.z = 0;
       }
 
       // 狼人變身狀態更新
@@ -957,12 +1007,12 @@ export class ThreeVillageRenderer {
   }
 
   /**
-   * 建立單一角色的 3D 複合模型 (優先套用上傳的 6 大中世紀 3D 人物 GLB 模型 + 巨狼變身形態 + 護盾)
+   * 建立單一角色的 3D 複合模型 (使用 SkeletonUtils.clone 複製 41 骨骼 Rigged 人物 + 巨狼變身形態 + 護盾)
    */
   private createPlayerCharacterGroup(p: PlayerState, isLocal: boolean): THREE.Group {
     const group = new THREE.Group();
 
-    // 1. 人類形態：依據角色職業或小屋編號選取專屬中世紀 3D 人物模型
+    // 1. 人類形態：依據角色職業選取專屬中世紀 3D 骨骼人物模型
     const humanGroup = new THREE.Group();
     humanGroup.name = 'humanBody';
 
@@ -979,10 +1029,11 @@ export class ThreeVillageRenderer {
     const charProto = this.modelPrototypes.get(charKey) || this.modelPrototypes.get('char_villager');
 
     if (charProto) {
-      const charClone = charProto.clone(true);
-      // 放大至 1.55 倍 (約 2.7m 視覺高度)，在俯角鏡頭下清晰呈現服裝與五官細節
+      const charClone = cloneSkeleton(charProto);
       charClone.scale.set(1.55, 1.55, 1.55);
       humanGroup.add(charClone);
+      // 註冊至 41 骨骼動作控制器
+      this.motionSystem.registerCharacter(p.id, humanGroup);
     } else {
       // GLB 尚未非同步載入完成前的幾毫秒過渡備援
       const bodyGeo = new THREE.CylinderGeometry(0.55, 0.7, 1.2, 7);

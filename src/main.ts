@@ -71,6 +71,7 @@ const gameToast = document.getElementById('game-toast')!;
 
 const btnInteract = document.getElementById('btn-interact')!;
 const btnSkill = document.getElementById('btn-skill')!;
+const btnCameraView = document.getElementById('btn-camera-view')!;
 
 // 提示訊息浮窗 Toast
 let toastTimer: number | null = null;
@@ -244,8 +245,22 @@ btnSoloSandbox.addEventListener('click', () => {
 });
 
 // ==========================================
-// 4. 輸入與互動綁定 (割麥 / 吃肉 / 變身)
+// 4. 輸入與互動綁定 (割麥 / 吃肉 / 變身 / 第一人稱視角切換)
 // ==========================================
+input.registerCameraToggleHandler((isFPV) => {
+  renderer.isFirstPerson = isFPV;
+  btnCameraView.innerText = isFPV ? '👁️ 視角: 第一人稱 [V]' : '👁️ 視角: 俯視 [V]';
+  showToast(
+    isFPV
+      ? '👁️ 已切換為【第一人稱沉浸視角】！點擊畫面或拖曳滑鼠可 360° 轉頭，按 Q/方向鍵亦可轉向，按 [V] 切回俯視。'
+      : '🗺️ 已切換回【第三人稱微縮俯視視角】！按 [V] 可隨時切換第一人稱。',
+    3500
+  );
+});
+btnCameraView.addEventListener('click', () => {
+  input.toggleFirstPerson();
+});
+
 input.registerInteractHandler(() => {
   triggerInteractAction();
 });
@@ -254,6 +269,7 @@ btnInteract.addEventListener('click', () => {
 });
 
 function triggerInteractAction() {
+  renderer.motionSystem.triggerAction(localPlayerId);
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleInteract(localPlayerId);
     if (res) {
@@ -278,6 +294,7 @@ btnSkill.addEventListener('click', () => {
 });
 
 function triggerSkillAction() {
+  renderer.motionSystem.triggerAction(localPlayerId);
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleSkillCast(localPlayerId);
     if (res) {
@@ -576,6 +593,9 @@ function gameLoop(now: number) {
     }
 
     updateMeetingUI(activeSnapshot);
+    renderer.isFirstPerson = input.isFirstPerson;
+    renderer.fpvYaw = input.fpvYaw;
+    renderer.fpvPitch = input.fpvPitch;
     renderer.render(activeSnapshot, VILLAGE_MAP, localPlayerId, deltaSec);
   }
 
