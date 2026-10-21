@@ -12,7 +12,8 @@ export enum PacketType {
   STATE_SYNC = 'STATE_SYNC',
   CALL_MEETING = 'CALL_MEETING',
   CAST_VOTE = 'CAST_VOTE',
-  CHAT_MSG = 'CHAT_MSG'
+  CHAT_MSG = 'CHAT_MSG',
+  SEND_LETTER = 'SEND_LETTER'
 }
 
 export interface JoinRequestPacket {
@@ -65,6 +66,13 @@ export interface ChatMessagePacket {
   timestamp: number;
 }
 
+export interface SendLetterPacket {
+  type: PacketType.SEND_LETTER;
+  fromId: PlayerId;
+  toId: PlayerId;
+  content: string;
+}
+
 export type NetworkPacket =
   | JoinRequestPacket
   | JoinAckPacket
@@ -72,4 +80,5 @@ export type NetworkPacket =
   | StateSyncPacket
   | CallMeetingPacket
   | CastVotePacket
-  | ChatMessagePacket;
+  | ChatMessagePacket
+  | SendLetterPacket;

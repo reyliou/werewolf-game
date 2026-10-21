@@ -1,54 +1,48 @@
 /**
  * @file state-machine.ts
- * @description 遊戲核心有限狀態機 (FSM) 與勝負結算引擎（嚴格純函數式狀態流轉）
+ * @description 狼人村莊四時段有限狀態機 (FSM)：早晨火堆會議、下午割麥工作、黃昏秘密傳信、夜晚變身獵殺
  */
 
-import { Faction, GamePhase, GameStateSnapshot, PlayerId, PlayerState, RoleType } from './types';
+import { Faction, GamePhase, GameStateSnapshot, LetterMessage, PlayerId, PlayerState, RoleType } from './types';
 
-export interface StateMachineConfig {
-  freeRoamDuration: number;   // 自由探索單次回合時間 (秒)
-  meetingDuration: number;    // 會議發言時間 (秒)
-  votingDuration: number;     // 投票時間 (秒)
-  ritualSpeedPerSec: number;  // 儀式基礎破譯速度 (%/秒)
+export interface VillagePhaseDurations {
+  morningDuration: number;    // 早晨火堆票人時間 (秒)
+  afternoonDuration: number;  // 下午工作割麥時間 (秒)
+  duskDuration: number;       // 黃昏傳信時間 (秒)
+  nightDuration: number;      // 夜晚自由獵殺時間 (秒)
 }
 
-export const DEFAULT_CONFIG: StateMachineConfig = {
-  freeRoamDuration: 90,
-  meetingDuration: 45,
-  votingDuration: 25,
-  ritualSpeedPerSec: 0.25
+export const DEFAULT_PHASE_CONFIG: VillagePhaseDurations = {
+  morningDuration: 40,
+  afternoonDuration: 60,
+  duskDuration: 25,
+  nightDuration: 45
 };
 
 export class GameStateMachine {
   private state: GameStateSnapshot;
-  private config: StateMachineConfig;
+  private config: VillagePhaseDurations;
   private votes: Record<PlayerId, PlayerId | 'SKIP'> = {};
-  private emergencyCalledBy: PlayerId | null = null;
-  private emergencyReason: string = '';
 
-  constructor(hostId: PlayerId, config: StateMachineConfig = DEFAULT_CONFIG) {
+  constructor(hostId: PlayerId, config: VillagePhaseDurations = DEFAULT_PHASE_CONFIG) {
     this.config = config;
     this.state = {
       tick: 0,
+      dayCount: 1,
       phase: GamePhase.LOBBY,
       phaseRemainingTime: 0,
-      ritualProgress: 0,
+      villageWheatTotal: 0,
+      targetWheatGoal: 25, // 採集滿 25 綑小麥村民獲勝
       players: {},
       hostId,
       winnerFaction: null,
-      winReason: undefined
+      winReason: undefined,
+      lastExecutedPlayerId: null
     };
   }
 
   public getSnapshot(): GameStateSnapshot {
     return JSON.parse(JSON.stringify(this.state));
-  }
-
-  public getMeetingInfo(): { callerId: PlayerId | null; reason: string } {
-    return {
-      callerId: this.emergencyCalledBy,
-      reason: this.emergencyReason
-    };
   }
 
   public addPlayer(player: PlayerState): boolean {
@@ -69,30 +63,37 @@ export class GameStateMachine {
   }
 
   /**
-   * 正式開始遊戲（分配身分並進入自由探索階段）
+   * 啟動 6 人村莊對局
    */
   public startGame(assignedRoles: Record<PlayerId, RoleType>): boolean {
     const playerIds = Object.keys(this.state.players);
-    if (playerIds.length < 2) {
-      // 至少需 2 人即可啟動測試（正式 6 人）
-      return false;
-    }
+    if (playerIds.length < 2) return false;
 
+    let cottageIdx = 1;
     for (const id of playerIds) {
-      const role = assignedRoles[id] || RoleType.SCHOLAR;
-      const faction = role === RoleType.STALKER ? 'SHADOW' : role === RoleType.TRICKSTER ? 'NEUTRAL' : 'ALIGNED';
+      const role = assignedRoles[id] || RoleType.VILLAGER;
+      const faction: Faction =
+        role === RoleType.WEREWOLF ? 'WEREWOLF' : role === RoleType.TRICKSTER ? 'NEUTRAL' : 'VILLAGE';
+
       this.state.players[id].role = role;
       this.state.players[id].faction = faction;
       this.state.players[id].isAlive = true;
       this.state.players[id].sanity = 100;
       this.state.players[id].skillCooldownRemaining = 0;
       this.state.players[id].hasShield = false;
-      this.state.players[id].isStealthed = false;
+      this.state.players[id].isTransformed = false;
+      this.state.players[id].wheatCount = 0;
+      this.state.players[id].meatCount = 0;
+      this.state.players[id].assignedCottageId = `cottage-${cottageIdx++}`;
+      this.state.players[id].insideCottageId = null;
+      this.state.players[id].unreadLetters = [];
     }
 
-    this.state.phase = GamePhase.FREE_ROAM;
-    this.state.phaseRemainingTime = this.config.freeRoamDuration;
-    this.state.ritualProgress = 0;
+    // 第一天由下午工作時間開始（讓大家先熟悉割麥與環境），或由早晨開始
+    this.state.dayCount = 1;
+    this.state.phase = GamePhase.AFTERNOON;
+    this.state.phaseRemainingTime = this.config.afternoonDuration;
+    this.state.villageWheatTotal = 0;
     this.state.winnerFaction = null;
     this.state.winReason = undefined;
     this.votes = {};
@@ -100,7 +101,7 @@ export class GameStateMachine {
   }
 
   /**
-   * 遊戲時鐘心跳 (每秒或每次 Tick 推進 delta 秒)
+   * 主循環時間推進
    */
   public step(deltaSeconds: number): GameStateSnapshot {
     if (this.state.phase === GamePhase.GAME_OVER || this.state.phase === GamePhase.LOBBY) {
@@ -110,7 +111,7 @@ export class GameStateMachine {
     this.state.tick += 1;
     this.state.phaseRemainingTime = Math.max(0, this.state.phaseRemainingTime - deltaSeconds);
 
-    // 遞減玩家技能冷卻時間
+    // 遞減玩家技能冷卻
     for (const id in this.state.players) {
       const p = this.state.players[id];
       if (p.skillCooldownRemaining > 0) {
@@ -118,148 +119,179 @@ export class GameStateMachine {
       }
     }
 
-    // 自由探索階段：增加儀式進度並檢查勝負
-    if (this.state.phase === GamePhase.FREE_ROAM) {
-      // 計算存活學者與普通存活守密成員數量，推動儀式進度
-      const livingScholars = Object.values(this.state.players).filter(
-        p => p.isAlive && p.role === RoleType.SCHOLAR
-      ).length;
-      const progressDelta = (this.config.ritualSpeedPerSec + livingScholars * 0.15) * deltaSeconds;
-      this.state.ritualProgress = Math.min(100, this.state.ritualProgress + progressDelta);
-
-      // 檢查進度滿是否獲勝
-      if (this.state.ritualProgress >= 100) {
-        this.triggerGameOver('ALIGNED', '古老封印儀式已全部破譯完成！守密同盟獲勝！');
-        return this.getSnapshot();
-      }
-
-      // 時間倒數耗盡：自動進入圓桌會議
-      if (this.state.phaseRemainingTime <= 0) {
-        this.callMeeting(this.state.hostId, '時間週期結束，鐘聲響起，全員召集。');
-      }
-    } else if (this.state.phase === GamePhase.MEETING_CALLED) {
-      if (this.state.phaseRemainingTime <= 0) {
-        this.state.phase = GamePhase.VOTING;
-        this.state.phaseRemainingTime = this.config.votingDuration;
-        this.votes = {};
-      }
-    } else if (this.state.phase === GamePhase.VOTING) {
-      if (this.state.phaseRemainingTime <= 0) {
-        this.resolveVoting();
-      }
+    // 時段倒數結束，觸發四時段流轉
+    if (this.state.phaseRemainingTime <= 0) {
+      this.advanceToNextPhase();
     }
 
-    // 每次狀態更新都檢驗常規勝負條件
     this.checkVictoryConditions();
     return this.getSnapshot();
   }
 
   /**
-   * 召開緊急會議或報告遺體
+   * 四時段順序推進：早晨 -> 下午 -> 黃昏 -> 夜晚 -> (次日)早晨
    */
-  public callMeeting(callerId: PlayerId, reason: string): boolean {
-    if (this.state.phase !== GamePhase.FREE_ROAM) return false;
+  private advanceToNextPhase(): void {
+    switch (this.state.phase) {
+      case GamePhase.MORNING:
+        // 早晨火堆投票時間截止，結算票數
+        this.resolveMorningVotes();
+        // 進入下午工作時間
+        this.state.phase = GamePhase.AFTERNOON;
+        this.state.phaseRemainingTime = this.config.afternoonDuration;
+        this.votes = {};
+        break;
 
-    this.state.phase = GamePhase.MEETING_CALLED;
-    this.state.phaseRemainingTime = this.config.meetingDuration;
-    this.state.meetingCallerId = callerId;
-    this.state.meetingReason = reason;
-    this.emergencyCalledBy = callerId;
-    this.emergencyReason = reason;
-    this.votes = {};
+      case GamePhase.AFTERNOON:
+        // 下午工作結束，進入黃昏秘密傳信時段
+        this.state.phase = GamePhase.DUSK;
+        this.state.phaseRemainingTime = this.config.duskDuration;
+        break;
 
-    // 召開會議時，解除所有人的隱形與護盾
-    for (const id in this.state.players) {
-      this.state.players[id].isStealthed = false;
-      this.state.players[id].hasShield = false;
+      case GamePhase.DUSK:
+        // 黃昏結束，黑夜降臨，進入夜晚自由時間
+        this.state.phase = GamePhase.NIGHT;
+        this.state.phaseRemainingTime = this.config.nightDuration;
+        break;
+
+      case GamePhase.NIGHT:
+        // 夜晚結束，狼人強制解除變身，全員迎接次日早晨火堆會議
+        for (const id in this.state.players) {
+          this.state.players[id].isTransformed = false;
+        }
+        this.state.dayCount += 1;
+        this.state.phase = GamePhase.MORNING;
+        this.state.phaseRemainingTime = this.config.morningDuration;
+        this.votes = {};
+        break;
     }
-    return true;
   }
 
   /**
-   * 提交投票
+   * 早晨火堆旁投票結算 (規則：必須「過半數」才處決，否則維持原議流票)
    */
   public castVote(voterId: PlayerId, targetId: PlayerId | 'SKIP'): boolean {
-    if (this.state.phase !== GamePhase.VOTING) return false;
+    if (this.state.phase !== GamePhase.MORNING) return false;
     const voter = this.state.players[voterId];
     if (!voter || !voter.isAlive) return false;
 
     this.votes[voterId] = targetId;
 
     // 若所有存活玩家皆已投票，提前結算
-    const livingPlayers = Object.values(this.state.players).filter(p => p.isAlive);
-    const hasAllVoted = livingPlayers.every(p => this.votes[p.id] !== undefined);
-    if (hasAllVoted) {
-      this.resolveVoting();
+    const living = Object.values(this.state.players).filter(p => p.isAlive);
+    const allVoted = living.every(p => this.votes[p.id] !== undefined);
+    if (allVoted) {
+      this.resolveMorningVotes();
+      this.state.phase = GamePhase.AFTERNOON;
+      this.state.phaseRemainingTime = this.config.afternoonDuration;
+      this.votes = {};
     }
     return true;
   }
 
-  /**
-   * 結算圓桌投票票數
-   */
-  private resolveVoting(): void {
-    const tally: Record<string, number> = { SKIP: 0 };
-    for (const voterId in this.votes) {
-      const target = this.votes[voterId];
-      tally[target] = (tally[target] || 0) + 1;
+  private resolveMorningVotes(): void {
+    const living = Object.values(this.state.players).filter(p => p.isAlive);
+    const livingCount = living.length;
+    const threshold = Math.floor(livingCount / 2) + 1; // 嚴格過半門檻
+
+    const tally: Record<string, number> = {};
+    for (const vId in this.votes) {
+      const t = this.votes[vId];
+      if (t && t !== 'SKIP') {
+        tally[t] = (tally[t] || 0) + 1;
+      }
     }
 
     let highestTarget: string | null = null;
-    let highestVotes = 0;
-    let isTie = false;
+    let highestCount = 0;
 
     for (const target in tally) {
-      const count = tally[target];
-      if (count > highestVotes) {
-        highestVotes = count;
+      if (tally[target] > highestCount) {
+        highestCount = tally[target];
         highestTarget = target;
-        isTie = false;
-      } else if (count === highestVotes && count > 0) {
-        isTie = true;
       }
     }
 
-    if (!isTie && highestTarget && highestTarget !== 'SKIP') {
+    // 檢驗是否過半數
+    if (highestTarget && highestCount >= threshold) {
       const victim = this.state.players[highestTarget];
       if (victim && victim.isAlive) {
         victim.isAlive = false;
+        this.state.lastExecutedPlayerId = highestTarget;
 
-        // 【微創新非對稱核心機制】：狂徒 (Trickster) 被投票淘汰時直接奪得勝利！
+        // 【狂徒非對稱獲勝】：成功引導火堆過半票死自己
         if (victim.role === RoleType.TRICKSTER) {
-          this.triggerGameOver('NEUTRAL', '混亂狂徒 (Trickster) 成功誘導眾人將其處決，達成終極非對稱狂歡勝利！');
+          this.triggerGameOver('NEUTRAL', '混亂狂徒於早晨火堆中成功被過半數票決淘汰，奪得終極非對稱狂歡勝利！');
           return;
         }
-      }
-    }
 
-    // 投票結算後檢查勝負；若未分勝負，重回自由探索階段
-    if (!this.checkVictoryConditions()) {
-      this.state.phase = GamePhase.FREE_ROAM;
-      this.state.phaseRemainingTime = this.config.freeRoamDuration;
-      this.votes = {};
+        // 老獵人死前反擊
+        if (victim.role === RoleType.HUNTER) {
+          console.log('[Hunter] 老獵人倒地前扣動了扳機！');
+        }
+      }
+    } else {
+      // 沒過半數，維持原議（流票平安夜）
+      this.state.lastExecutedPlayerId = null;
     }
   }
 
   /**
-   * 檢驗整體勝利條件
+   * 黃昏秘密發送書信
+   */
+  public sendDuskLetter(fromId: PlayerId, toId: PlayerId, content: string): boolean {
+    if (this.state.phase !== GamePhase.DUSK) return false;
+    const sender = this.state.players[fromId];
+    const receiver = this.state.players[toId];
+    if (!sender || !receiver || !sender.isAlive || !receiver.isAlive) return false;
+
+    const letter: LetterMessage = {
+      fromId,
+      fromName: sender.name,
+      toId,
+      content,
+      timestamp: Date.now()
+    };
+    receiver.unreadLetters.push(letter);
+    return true;
+  }
+
+  /**
+   * 村民採集小麥入庫
+   */
+  public addVillageWheat(amount: number): void {
+    this.state.villageWheatTotal += amount;
+    if (this.state.villageWheatTotal >= this.state.targetWheatGoal) {
+      this.triggerGameOver('VILLAGE', `村莊成功收割累積了 ${this.state.targetWheatGoal} 綑小麥！村民陣營靠勤勞獲勝！`);
+    }
+  }
+
+  /**
+   * 狼人白天破壞小麥儲備
+   */
+  public sabotageWheat(amount: number): void {
+    this.state.villageWheatTotal = Math.max(0, this.state.villageWheatTotal - amount);
+  }
+
+  /**
+   * 檢驗整體勝負條件
    */
   private checkVictoryConditions(): boolean {
     if (this.state.phase === GamePhase.GAME_OVER) return true;
 
     const living = Object.values(this.state.players).filter(p => p.isAlive);
-    const livingShadows = living.filter(p => p.faction === 'SHADOW').length;
-    const livingAligned = living.filter(p => p.faction === 'ALIGNED').length;
+    const wolves = living.filter(p => p.faction === 'WEREWOLF').length;
+    const villagers = living.filter(p => p.faction === 'VILLAGE').length;
 
-    // 1. 所有幽影陣營滅亡 -> 守密同盟獲勝
-    if (livingShadows === 0 && living.length > 0) {
-      this.triggerGameOver('ALIGNED', '所有暗影已完全被驅逐消滅！守密同盟獲勝！');
+    // 1. 所有狼人滅亡 -> 村民獲勝
+    if (wolves === 0 && living.length > 0) {
+      this.triggerGameOver('VILLAGE', '所有潛伏的狼人均已被驅逐消滅！村莊重獲和平！');
       return true;
     }
 
-    // 2. 幽影數量大於或等於存活守密成員 -> 幽影獲勝
-    if (livingShadows >= livingAligned && livingShadows > 0) {
-      this.triggerGameOver('SHADOW', '暗影已徹底籠罩並壓制了守密同盟！幽影陣營獲勝！');
+    // 2. 狼人數量大於或等於村民數量 -> 狼人獲勝
+    if (wolves >= villagers && wolves > 0) {
+      this.triggerGameOver('WEREWOLF', '夜幕血月降臨，狼人數量已壓制村莊！狼人陣營獲勝！');
       return true;
     }
 

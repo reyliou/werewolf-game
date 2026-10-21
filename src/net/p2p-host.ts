@@ -36,17 +36,22 @@ export class P2PHost {
     this.engine.fsm.addPlayer({
       id: hostPlayerId,
       name: hostName,
-      role: RoleType.DETECTIVE,
-      faction: 'ALIGNED',
+      role: RoleType.VILLAGER,
+      faction: 'VILLAGE',
       isAlive: true,
-      x: 600,
-      y: 450,
+      x: 700,
+      y: 560,
       rotation: 0,
       speed: 160,
       sanity: 100,
       skillCooldownRemaining: 0,
       hasShield: false,
-      isStealthed: false,
+      isTransformed: false,
+      wheatCount: 0,
+      meatCount: 0,
+      assignedCottageId: 'cottage-1',
+      insideCottageId: null,
+      unreadLetters: [],
       color: PLAYER_COLORS[0]
     });
   }
@@ -113,18 +118,23 @@ export class P2PHost {
 
         const newPlayer: PlayerState = {
           id: packet.playerId,
-          name: packet.playerName || `玩家 ${count + 1}`,
-          role: RoleType.SCHOLAR,
-          faction: 'ALIGNED',
+          name: packet.playerName || `村民 ${count + 1}`,
+          role: RoleType.VILLAGER,
+          faction: 'VILLAGE',
           isAlive: true,
-          x: 520 + (count * 30),
-          y: 450 + (count % 2 === 0 ? 30 : -30),
+          x: 700 + (count * 25),
+          y: 560 + (count % 2 === 0 ? 30 : -30),
           rotation: 0,
           speed: 160,
           sanity: 100,
           skillCooldownRemaining: 0,
           hasShield: false,
-          isStealthed: false,
+          isTransformed: false,
+          wheatCount: 0,
+          meatCount: 0,
+          assignedCottageId: `cottage-${count + 1}`,
+          insideCottageId: null,
+          unreadLetters: [],
           color: PLAYER_COLORS[count % PLAYER_COLORS.length]
         };
 
@@ -136,7 +146,7 @@ export class P2PHost {
           success: true,
           assignedRole: newPlayer.role,
           hostId: this.engine.fsm.getSnapshot().hostId,
-          message: '加入房間成功！'
+          message: '加入村莊成功！'
         });
 
         this.onPlayerCountChange?.(this.getConnectedPlayerCount());
@@ -149,13 +159,17 @@ export class P2PHost {
         if (packet.actionTriggered === 'SKILL') {
           this.engine.handleSkillCast(packet.playerId);
         } else if (packet.actionTriggered === 'INTERACT') {
-          this.engine.handleTriggerEmergency(packet.playerId);
+          this.engine.handleInteract(packet.playerId);
         }
         break;
       }
 
+      case PacketType.SEND_LETTER: {
+        this.engine.fsm.sendDuskLetter(packet.fromId, packet.toId, packet.content);
+        break;
+      }
+
       case PacketType.CALL_MEETING: {
-        this.engine.handleTriggerEmergency(packet.callerId);
         break;
       }
 
@@ -165,7 +179,6 @@ export class P2PHost {
       }
 
       case PacketType.CHAT_MSG: {
-        // 廣播聊天訊息給所有成員
         this.broadcast(packet);
         break;
       }
@@ -177,19 +190,19 @@ export class P2PHost {
   }
 
   /**
-   * 啟動 6 人對局並隨機分派身分
+   * 啟動 6 人村莊對局並隨機分派身分
    */
   public startGame(): boolean {
     const snapshot = this.engine.fsm.getSnapshot();
     const playerIds = Object.keys(snapshot.players);
 
-    // 6 種固定職業槽位
+    // 6 大村莊核心職業槽位
     const rolesPool = [
-      RoleType.DETECTIVE,
+      RoleType.VILLAGER,
+      RoleType.WEREWOLF,
       RoleType.DOCTOR,
-      RoleType.SEALER,
-      RoleType.SCHOLAR,
-      RoleType.STALKER,
+      RoleType.HUNTER,
+      RoleType.SEER,
       RoleType.TRICKSTER
     ];
 

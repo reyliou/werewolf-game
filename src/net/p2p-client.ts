@@ -127,6 +127,17 @@ export class P2PClient {
     });
   }
 
+  public sendLetter(toId: PlayerId, content: string): void {
+    if (!this.connection || !this.connection.open) return;
+
+    this.connection.send({
+      type: PacketType.SEND_LETTER,
+      fromId: this.playerId,
+      toId,
+      content
+    });
+  }
+
   public disconnect(): void {
     if (this.connection) {
       this.connection.close();

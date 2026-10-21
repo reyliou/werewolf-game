@@ -1,50 +1,59 @@
 /**
  * @file engine.ts
- * @description 遊戲主邏輯循環、玩家物理移動與碰撞判定（由 Host 權威執行）
+ * @description 狼人村莊權威引擎：物理移動、進出木屋室內檢測、割麥、吃肉與狼人變身判定
  */
 
-import { checkCircleRectCollision, DEFAULT_MAP, GameMap } from './map-data';
-import { executeRoleSkill, executeShadowKill } from './roles';
+import { checkCircleRectCollision, isPointInRect, VILLAGE_MAP, VillageMap } from './map-data';
+import { executeWerewolfKill } from './roles';
 import { GameStateMachine } from './state-machine';
-import { GamePhase, GameStateSnapshot, PlayerId } from './types';
+import { GamePhase, GameStateSnapshot, PlayerId, RoleType } from './types';
 
 export class GameEngine {
   public fsm: GameStateMachine;
-  public map: GameMap;
+  public map: VillageMap;
   private readonly playerRadius: number = 18;
 
-  constructor(hostId: PlayerId, map: GameMap = DEFAULT_MAP) {
+  constructor(hostId: PlayerId, map: VillageMap = VILLAGE_MAP) {
     this.fsm = new GameStateMachine(hostId);
     this.map = map;
   }
 
   /**
-   * 處理客戶端傳遞的移動輸入 (權威校驗並更新座標)
+   * 處理玩家移動輸入與進出木屋室內檢測
    */
-  public handlePlayerMove(playerId: PlayerId, dx: number, dy: number, rotation: number, deltaSec: number): void {
+  public handlePlayerMove(
+    playerId: PlayerId,
+    dx: number,
+    dy: number,
+    rotation: number,
+    deltaSec: number
+  ): void {
     const snapshot = this.fsm.getSnapshot();
-    if (snapshot.phase !== GamePhase.FREE_ROAM) return;
+    if (snapshot.phase === GamePhase.GAME_OVER || snapshot.phase === GamePhase.LOBBY) return;
 
     const player = snapshot.players[playerId];
     if (!player || !player.isAlive) return;
 
-    // 正規化輸入向量並套用速度
+    // 狼人變身後獲得速度爆發加成
+    const currentSpeed = player.isTransformed ? player.speed * 1.35 : player.speed;
+
+    // 正規化移動向量
     let moveX = dx;
     let moveY = dy;
     const len = Math.sqrt(moveX * moveX + moveY * moveY);
     if (len > 0) {
-      moveX = (moveX / len) * player.speed * deltaSec;
-      moveY = (moveY / len) * player.speed * deltaSec;
+      moveX = (moveX / len) * currentSpeed * deltaSec;
+      moveY = (moveY / len) * currentSpeed * deltaSec;
     }
 
     let targetX = player.x + moveX;
     let targetY = player.y + moveY;
 
-    // 邊界限制
+    // 地圖邊界限制
     targetX = Math.max(this.playerRadius + 20, Math.min(this.map.width - this.playerRadius - 20, targetX));
     targetY = Math.max(this.playerRadius + 20, Math.min(this.map.height - this.playerRadius - 20, targetY));
 
-    // 牆體碰撞檢測 (X 軸獨立碰撞檢測)
+    // 碰撞檢查 (X 軸)
     let collisionX = false;
     for (const wall of this.map.walls) {
       if (checkCircleRectCollision(targetX, player.y, this.playerRadius, wall)) {
@@ -52,11 +61,9 @@ export class GameEngine {
         break;
       }
     }
-    if (collisionX) {
-      targetX = player.x;
-    }
+    if (collisionX) targetX = player.x;
 
-    // 牆體碰撞檢測 (Y 軸獨立碰撞檢測)
+    // 碰撞檢查 (Y 軸)
     let collisionY = false;
     for (const wall of this.map.walls) {
       if (checkCircleRectCollision(player.x, targetY, this.playerRadius, wall)) {
@@ -64,91 +71,146 @@ export class GameEngine {
         break;
       }
     }
-    if (collisionY) {
-      targetY = player.y;
-    }
+    if (collisionY) targetY = player.y;
 
     player.x = targetX;
     player.y = targetY;
     player.rotation = rotation;
 
+    // 檢測當前是否走進某間木屋內部
+    let insideId: string | null = null;
+    for (const cottage of this.map.cottages) {
+      if (isPointInRect(player.x, player.y, cottage.rect)) {
+        insideId = cottage.id;
+        break;
+      }
+    }
+    player.insideCottageId = insideId;
+
     this.fsm.updatePlayer(player);
   }
 
   /**
-   * 玩家嘗試發動主動技能
+   * 玩家按下 [E] 進行互動（下午在麥田割麥、在肉架吃肉）
    */
-  public handleSkillCast(casterId: PlayerId, targetId?: PlayerId): { success: boolean; message: string } {
+  public handleInteract(playerId: PlayerId): { success: boolean; message: string } {
     const snapshot = this.fsm.getSnapshot();
-    if (snapshot.phase !== GamePhase.FREE_ROAM) {
-      return { success: false, message: '非自由探索階段無法施展技能' };
-    }
+    const player = snapshot.players[playerId];
+    if (!player || !player.isAlive) return { success: false, message: '玩家無法互動' };
 
-    const caster = snapshot.players[casterId];
-    if (!caster) return { success: false, message: '找不到該玩家' };
+    // 1. 檢測是否在麥田範圍內 (下午工作時段)
+    for (const patch of this.map.wheatPatches) {
+      if (isPointInRect(player.x, player.y, patch.rect)) {
+        if (snapshot.phase !== GamePhase.AFTERNOON) {
+          return { success: false, message: '非下午工作時間，農田休耕中' };
+        }
+        if (patch.currentWheat <= 0) {
+          return { success: false, message: '此耕地小麥已被收割完畢，等待生長' };
+        }
 
-    const target = targetId ? snapshot.players[targetId] : undefined;
-    const result = executeRoleSkill(caster, target);
-
-    if (result.success) {
-      this.fsm.updatePlayer(result.updatedPlayer);
-      if (result.targetPlayer) {
-        this.fsm.updatePlayer(result.targetPlayer);
+        patch.currentWheat -= 1;
+        player.wheatCount += 1;
+        this.fsm.addVillageWheat(1);
+        this.fsm.updatePlayer(player);
+        return {
+          success: true,
+          message: `${player.name} 揮動鐮刀收割了 1 綑金黃小麥！🌾 (全村累積: ${this.fsm.getSnapshot().villageWheatTotal}/${snapshot.targetWheatGoal})`
+        };
       }
     }
-    return { success: result.success, message: result.message };
+
+    // 2. 檢測是否在生鮮肉架範圍內 (狼人吃肉)
+    for (const rack of this.map.meatRacks) {
+      if (isPointInRect(player.x, player.y, rack.rect)) {
+        if (player.role !== RoleType.WEREWOLF) {
+          return { success: false, message: '那是風乾肉品，只有嗜血的野獸才會急迫吞食。' };
+        }
+        if (rack.meatAvailable <= 0) {
+          return { success: false, message: '肉架上的鮮肉已被吃光！' };
+        }
+
+        rack.meatAvailable -= 1;
+        player.meatCount += 1;
+        this.fsm.updatePlayer(player);
+        return {
+          success: true,
+          message: `你撕咬吞食了鮮肉塊 🥩 (當前食量: ${player.meatCount})，體力暴漲！`
+        };
+      }
+    }
+
+    return { success: false, message: '附近沒有可互動的物件。' };
   }
 
   /**
-   * 幽影發動暗殺
+   * 玩家按下 [Space] 觸發角色專屬技能或變身
    */
-  public handleShadowAttack(stalkerId: PlayerId, victimId: PlayerId): { success: boolean; message: string } {
+  public handleSkillCast(playerId: PlayerId, targetId?: PlayerId): { success: boolean; message: string } {
     const snapshot = this.fsm.getSnapshot();
-    if (snapshot.phase !== GamePhase.FREE_ROAM) {
-      return { success: false, message: '非探索暗殺階段' };
+    const player = snapshot.players[playerId];
+    if (!player || !player.isAlive) return { success: false, message: '無法施展' };
+
+    // 狼人變身機制 (夜晚限定)
+    if (player.role === RoleType.WEREWOLF) {
+      if (snapshot.phase === GamePhase.NIGHT) {
+        player.isTransformed = !player.isTransformed;
+        this.fsm.updatePlayer(player);
+        return {
+          success: true,
+          message: player.isTransformed
+            ? '🐺 獠牙顯露！你已變身為狂暴巨狼！速度暴增，開始獵殺！'
+            : '已收起獠牙，恢復人類偽裝外觀。'
+        };
+      } else {
+        // 白天狼人破壞麥田
+        if (snapshot.phase === GamePhase.AFTERNOON) {
+          for (const patch of this.map.wheatPatches) {
+            if (isPointInRect(player.x, player.y, patch.rect)) {
+              this.fsm.sabotageWheat(2);
+              return { success: true, message: '你暗中踐踏並毀損了麥田 (-2 🌾)！村民間的猜疑正在蔓延...' };
+            }
+          }
+        }
+        return { success: false, message: '白晝之下無法變身，請在夜晚月光下現出真身。' };
+      }
     }
 
-    const stalker = snapshot.players[stalkerId];
+    // 藥劑師庇護護盾
+    if (player.role === RoleType.DOCTOR) {
+      const target = targetId ? snapshot.players[targetId] : player;
+      if (target && target.isAlive) {
+        target.hasShield = true;
+        this.fsm.updatePlayer(target);
+        return { success: true, message: `已為 ${target.name} 施加了聖光草藥護盾！` };
+      }
+    }
+
+    return { success: false, message: '目前時段無法施展該技能。' };
+  }
+
+  /**
+   * 狼人於夜晚撲殺村民
+   */
+  public handleWerewolfAttack(wolfId: PlayerId, victimId: PlayerId): { success: boolean; message: string } {
+    const snapshot = this.fsm.getSnapshot();
+    if (snapshot.phase !== GamePhase.NIGHT) {
+      return { success: false, message: '只有在黑夜之中才能發動狼人獵殺！' };
+    }
+
+    const wolf = snapshot.players[wolfId];
     const victim = snapshot.players[victimId];
-    if (!stalker || !victim) return { success: false, message: '玩家不存在' };
+    if (!wolf || !victim) return { success: false, message: '玩家不存在' };
 
-    const killResult = executeShadowKill(stalker, victim);
-    if (killResult.success || killResult.message.includes('破碎')) {
-      this.fsm.updatePlayer(killResult.updatedStalker);
-      this.fsm.updatePlayer(killResult.updatedVictim);
+    const killRes = executeWerewolfKill(wolf, victim);
+    if (killRes.success || killRes.message.includes('破碎')) {
+      this.fsm.updatePlayer(killRes.updatedWolf);
+      this.fsm.updatePlayer(killRes.updatedVictim);
     }
-    return { success: killResult.success, message: killResult.message };
+    return { success: killRes.success, message: killRes.message };
   }
 
   /**
-   * 玩家在中央圓桌觸發緊急會議
-   */
-  public handleTriggerEmergency(callerId: PlayerId): { success: boolean; message: string } {
-    const snapshot = this.fsm.getSnapshot();
-    if (snapshot.phase !== GamePhase.FREE_ROAM) {
-      return { success: false, message: '當前階段無法觸發會議' };
-    }
-
-    const caller = snapshot.players[callerId];
-    if (!caller || !caller.isAlive) {
-      return { success: false, message: '陣亡玩家無法召開會議' };
-    }
-
-    // 檢驗是否在中央圓桌範圍內
-    const councilTable = this.map.zones.find(z => z.type === 'MEETING_TABLE');
-    if (!councilTable) return { success: false, message: '未找到中央會議桌' };
-
-    const inRange = checkCircleRectCollision(caller.x, caller.y, 40, councilTable.rect);
-    if (!inRange) {
-      return { success: false, message: '必須站在中央圓桌周圍才能敲響警鐘！' };
-    }
-
-    this.fsm.callMeeting(callerId, `${caller.name} 於中央圓桌敲響了緊急警鐘！全員召集！`);
-    return { success: true, message: '會議已正式召開！' };
-  }
-
-  /**
-   * 主循環心跳推進
+   * 主循環更新
    */
   public update(deltaSec: number): GameStateSnapshot {
     return this.fsm.step(deltaSec);

@@ -3,7 +3,7 @@
  * @description 動態迷霧視野系統 (Fog of War)：基於視野光圈、視線障礙遮蔽與心智壓迫
  */
 
-import { GameMap, Rect } from '../core/map-data';
+import { Rect, VillageMap } from '../core/map-data';
 import { PlayerState } from '../core/types';
 
 /**
@@ -81,16 +81,14 @@ export class FogOfWar {
   public isPlayerVisible(
     localPlayer: PlayerState,
     target: PlayerState,
-    map: GameMap
+    map: VillageMap
   ): boolean {
     if (localPlayer.id === target.id) return true;
     if (!localPlayer.isAlive) return true; // 幽靈/陣亡者具備全知幽靈視角
 
-    // 幽影隱形：若未達背刺極近身半徑 (< 50px)，完全不可見
-    if (target.isStealthed && localPlayer.faction !== 'SHADOW') {
-      const dx = localPlayer.x - target.x;
-      const dy = localPlayer.y - target.y;
-      if (dx * dx + dy * dy > 50 * 50) return false;
+    // 若目標在木屋室內且本地玩家不在同間屋內，不可見
+    if (target.insideCottageId && target.insideCottageId !== localPlayer.insideCottageId) {
+      return false;
     }
 
     // 視野半徑檢查
@@ -119,7 +117,7 @@ export class FogOfWar {
   public applyFog(
     ctx: CanvasRenderingContext2D,
     localPlayer: PlayerState,
-    map: GameMap
+    map: { width: number; height: number; bonfire?: { x: number; y: number } }
   ): void {
     const octx = this.offscreenCtx;
     const w = this.offscreenCanvas.width;
@@ -155,16 +153,16 @@ export class FogOfWar {
     octx.arc(localPlayer.x, localPlayer.y, baseRadius, 0, Math.PI * 2);
     octx.fill();
 
-    // 3. 祭壇與中央圓桌微光引導 (讓玩家隱約感知任務目標方向)
-    for (const zone of map.zones) {
-      const zx = zone.rect.x + zone.rect.width / 2;
-      const zy = zone.rect.y + zone.rect.height / 2;
-      const zoneGrad = octx.createRadialGradient(zx, zy, 20, zx, zy, 70);
-      zoneGrad.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
-      zoneGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      octx.fillStyle = zoneGrad;
+    // 3. 中央火堆微光引導
+    if (map.bonfire) {
+      const bx = map.bonfire.x;
+      const by = map.bonfire.y;
+      const fireGrad = octx.createRadialGradient(bx, by, 30, bx, by, 120);
+      fireGrad.addColorStop(0, 'rgba(0, 0, 0, 0.7)');
+      fireGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      octx.fillStyle = fireGrad;
       octx.beginPath();
-      octx.arc(zx, zy, 70, 0, Math.PI * 2);
+      octx.arc(bx, by, 120, 0, Math.PI * 2);
       octx.fill();
     }
 
