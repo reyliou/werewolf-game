@@ -10,11 +10,11 @@ import { InputController } from './input/input-controller';
 import { P2PClient } from './net/p2p-client';
 import { P2PHost } from './net/p2p-host';
 import { generateRoomCode } from './net/peer-manager';
-import { CanvasRenderer } from './render/canvas-view';
+import { ThreeVillageRenderer } from './render/three-village-view';
 
-const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-const renderer = new CanvasRenderer(canvas);
-const input = new InputController(canvas);
+const container = document.getElementById('game-container')!;
+const renderer = new ThreeVillageRenderer(container);
+const input = new InputController(renderer.renderer.domElement);
 
 // 音訊點擊首解鎖
 const initAudioOnce = () => {

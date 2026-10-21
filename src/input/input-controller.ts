@@ -55,7 +55,10 @@ export class InputController {
     if (this.keys['a'] || this.keys['arrowleft']) dx -= 1;
     if (this.keys['d'] || this.keys['arrowright']) dx += 1;
 
-    const rotation = Math.atan2(this.mouseY - currentY, this.mouseX - currentX);
+    let rotation = Math.atan2(this.mouseY - currentY, this.mouseX - currentX);
+    if (dx !== 0 || dy !== 0) {
+      rotation = Math.atan2(dy, dx);
+    }
     return { dx, dy, rotation };
   }
 }
