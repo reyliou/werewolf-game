@@ -47,14 +47,15 @@ export class ThreeVillageRenderer {
     this.camera = new THREE.PerspectiveCamera(40, aspect, 0.5, 500);
     this.camera.position.set(0, 42, 38);
 
-    // 2. 初始化 WebGL 渲染器 (柔和陰影與色調映射)
+    // 2. 初始化 WebGL 渲染器 (確保正確 DPI 解析度、柔和陰影與色調映射)
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     container.appendChild(this.renderer.domElement);
 
@@ -95,10 +96,11 @@ export class ThreeVillageRenderer {
     // 5. 批次載入外部 .glb 模型
     this.loadAllGLBModels();
 
-    // 響應視窗調整
+    // 響應視窗調整 (高解析度重設)
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
   }

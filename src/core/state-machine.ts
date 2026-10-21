@@ -67,7 +67,7 @@ export class GameStateMachine {
    */
   public startGame(assignedRoles: Record<PlayerId, RoleType>): boolean {
     const playerIds = Object.keys(this.state.players);
-    if (playerIds.length < 2) return false;
+    if (playerIds.length < 1) return false;
 
     let cottageIdx = 1;
     for (const id of playerIds) {

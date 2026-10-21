@@ -145,8 +145,9 @@ btnStartGame.addEventListener('click', () => {
   const started = hostInstance.startGame();
   if (started) {
     lobbyModal.style.display = 'none';
+    showToast('🌾 村莊生活正式開啟！使用 WASD 或方向鍵移動，按 [E] 進行互動！', 4000);
   } else {
-    alert('至少需要 2 名以上村民或進入單機模擬！');
+    alert('啟動村莊失敗，請重試！');
   }
 });
 
@@ -239,6 +240,7 @@ btnSoloSandbox.addEventListener('click', () => {
 
   hostInstance.startGame();
   lobbyModal.style.display = 'none';
+  showToast('🌾 已進入單機村莊！使用 WASD 或方向鍵移動，按 [E] 進行互動！', 4000);
 });
 
 // ==========================================

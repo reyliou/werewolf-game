@@ -193,6 +193,37 @@ export class P2PHost {
    * 啟動 6 人村莊對局並隨機分派身分
    */
   public startGame(): boolean {
+    const mockNames = ['農夫-亞歷山大', '藥劑師-艾蓮娜', '老獵人-萊昂', '占卜師-諾亞', '混亂狂徒-洛基', '神秘客-卡爾'];
+    let botIndex = 1;
+
+    // 若玩家不足 6 人，自動補齊 AI 村民，確保房主一人即可即時暢玩體驗
+    while (Object.keys(this.engine.fsm.getSnapshot().players).length < 6) {
+      const count = Object.keys(this.engine.fsm.getSnapshot().players).length;
+      const botId = `bot-${botIndex}`;
+      this.engine.fsm.addPlayer({
+        id: botId,
+        name: mockNames[count % mockNames.length],
+        role: RoleType.VILLAGER,
+        faction: 'VILLAGE',
+        isAlive: true,
+        x: 350 + count * 120,
+        y: 400 + (count % 2 === 0 ? 60 : -60),
+        rotation: 0,
+        speed: 155,
+        sanity: 100,
+        skillCooldownRemaining: 0,
+        hasShield: false,
+        isTransformed: false,
+        wheatCount: 0,
+        meatCount: 0,
+        assignedCottageId: `cottage-${count + 1}`,
+        insideCottageId: null,
+        unreadLetters: [],
+        color: PLAYER_COLORS[count % PLAYER_COLORS.length]
+      });
+      botIndex++;
+    }
+
     const snapshot = this.engine.fsm.getSnapshot();
     const playerIds = Object.keys(snapshot.players);
 

@@ -12,24 +12,39 @@ export class InputController {
 
   constructor(canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
-      this.keys[e.key.toLowerCase()] = true;
+      // 避免在文字輸入框中打字時觸發人物移動
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        return;
+      }
+
+      // 支援實體鍵盤代碼 (code: 免疫微軟注音/拼音等輸入法攔截)
+      this.keys[e.code] = true;
+      if (e.key) {
+        this.keys[e.key.toLowerCase()] = true;
+      }
+
       if (e.code === 'Space') {
         e.preventDefault();
         this.onSkillTrigger?.();
       }
-      if (e.key.toLowerCase() === 'e') {
+      if (e.code === 'KeyE' || e.key.toLowerCase() === 'e') {
         this.onInteractTrigger?.();
       }
     });
 
     window.addEventListener('keyup', (e) => {
-      this.keys[e.key.toLowerCase()] = false;
+      this.keys[e.code] = false;
+      if (e.key) {
+        this.keys[e.key.toLowerCase()] = false;
+      }
     });
 
-    canvas.addEventListener('mousemove', (e) => {
+    // 全視窗平滑追蹤滑鼠視線
+    window.addEventListener('mousemove', (e) => {
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      const scaleX = canvas.width / (rect.width || 1);
+      const scaleY = canvas.height / (rect.height || 1);
       this.mouseX = (e.clientX - rect.left) * scaleX;
       this.mouseY = (e.clientY - rect.top) * scaleY;
     });
@@ -44,16 +59,20 @@ export class InputController {
   }
 
   /**
-   * 取得當前方向向量與朝向角度
+   * 取得當前方向向量與朝向角度 (支援 WASD、方向鍵、輸入法中英狀態)
    */
   public getMovement(currentX: number, currentY: number): { dx: number; dy: number; rotation: number } {
     let dx = 0;
     let dy = 0;
 
-    if (this.keys['w'] || this.keys['arrowup']) dy -= 1;
-    if (this.keys['s'] || this.keys['arrowdown']) dy += 1;
-    if (this.keys['a'] || this.keys['arrowleft']) dx -= 1;
-    if (this.keys['d'] || this.keys['arrowright']) dx += 1;
+    // 上 (W / ArrowUp / KeyW)
+    if (this.keys['KeyW'] || this.keys['w'] || this.keys['ArrowUp'] || this.keys['arrowup']) dy -= 1;
+    // 下 (S / ArrowDown / KeyS)
+    if (this.keys['KeyS'] || this.keys['s'] || this.keys['ArrowDown'] || this.keys['arrowdown']) dy += 1;
+    // 左 (A / ArrowLeft / KeyA)
+    if (this.keys['KeyA'] || this.keys['a'] || this.keys['ArrowLeft'] || this.keys['arrowleft']) dx -= 1;
+    // 右 (D / ArrowRight / KeyD)
+    if (this.keys['KeyD'] || this.keys['d'] || this.keys['ArrowRight'] || this.keys['arrowright']) dx += 1;
 
     let rotation = Math.atan2(this.mouseY - currentY, this.mouseX - currentX);
     if (dx !== 0 || dy !== 0) {
