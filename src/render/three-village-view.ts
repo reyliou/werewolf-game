@@ -28,9 +28,19 @@ export class ThreeVillageRenderer {
   private bonfireLight: THREE.PointLight;
   private playerLantern: THREE.PointLight;
 
-  // 3D 玩家網格快取與木屋網格快取
+  // 3D 玩家網格快取與可走入式木屋實例快取
   private playerMeshes: Map<PlayerId, THREE.Group> = new Map();
-  private cottageMeshes: Map<string, THREE.Group> = new Map();
+  private cottageInstances: Map<
+    string,
+    {
+      group: THREE.Group;
+      roofGroup: THREE.Group;
+      frontWallGroup: THREE.Group;
+      doorPivot: THREE.Group;
+      lockBar: THREE.Mesh;
+      isNorthRow: boolean;
+    }
+  > = new Map();
 
   // GLB 模型原型快取
   private modelPrototypes: Map<string, THREE.Group> = new Map();
@@ -478,6 +488,8 @@ export class ThreeVillageRenderer {
       barrel: '/assets/models/barrel.glb',
       cart: '/assets/models/cart.glb',
       streetlight: '/assets/models/streetlight.glb',
+      table: '/assets/models/table.glb',
+      chair: '/assets/models/chair.glb',
       // 樹木森林 (已移除 LOD1 重疊破圖並內嵌完整貼圖)
       tree1: '/assets/models/nature/tree_01.glb',
       tree2: '/assets/models/nature/tree_02.glb',
@@ -588,23 +600,20 @@ export class ThreeVillageRenderer {
       this.spawnModel('streetlight', lc.x, this.getTerrainHeight(lc.x, lc.z), lc.z, 2.4, lc.rot);
     }
 
-    // 2. 6 間村民專屬小屋 (座標與 map-data.ts 的 2D 碰撞牆中心 100% 精準對齊，徹底消除空氣牆錯位！)
+    // 2. 6 間可走入式村民專屬木屋 (含完整 3D 室內裝潢、可動木門、自動掀頂透視，且與 map-data.ts 碰撞箱 100% 對齊！)
     const cottageSpecs = [
-      { id: 'cottage-1', key: 'house1', x: -47.3, z: -39.6, scale: 0.82, rot: 0, padW: 15.4, padD: 13.2 },
-      { id: 'cottage-2', key: 'house2', x: 0.0, z: -39.6, scale: 0.85, rot: 0, padW: 15.6, padD: 8.6 },
-      { id: 'cottage-3', key: 'house3', x: 47.3, z: -39.6, scale: 0.95, rot: 0, padW: 14.4, padD: 13.2 },
-      { id: 'cottage-4', key: 'house4', x: -47.3, z: 39.6, scale: 1.05, rot: Math.PI, padW: 12.2, padD: 13.0 },
-      { id: 'cottage-5', key: 'house3', x: 0.0, z: 39.6, scale: 0.95, rot: Math.PI, padW: 14.4, padD: 13.2 },
-      { id: 'cottage-6', key: 'house2', x: 47.3, z: 39.6, scale: 0.85, rot: Math.PI, padW: 15.6, padD: 8.6 }
+      { id: 'cottage-1', x: -47.3, z: -39.6, isNorth: true, roofHex: '#b45309', rugHex: '#991b1b', theme: 'FARMER' },
+      { id: 'cottage-2', x: 0.0, z: -39.6, isNorth: true, roofHex: '#1e3a8a', rugHex: '#1d4ed8', theme: 'ALCHEMIST' },
+      { id: 'cottage-3', x: 47.3, z: -39.6, isNorth: true, roofHex: '#a16207', rugHex: '#854d0e', theme: 'HUNTER' },
+      { id: 'cottage-4', x: -47.3, z: 39.6, isNorth: false, roofHex: '#581c87', rugHex: '#6b21a8', theme: 'SEER' },
+      { id: 'cottage-5', x: 0.0, z: 39.6, isNorth: false, roofHex: '#166534', rugHex: '#15803d', theme: 'TRICKSTER' },
+      { id: 'cottage-6', x: 47.3, z: 39.6, isNorth: false, roofHex: '#7f1d1d', rugHex: '#991b1b', theme: 'LORD' }
     ];
 
     for (const c of cottageSpecs) {
       const cy = this.getTerrainHeight(c.x, c.z);
-      this.spawnStoneFoundation(c.x, cy, c.z, c.padW, c.padD, c.rot);
-      const houseGroup = this.spawnModel(c.key, c.x, cy + 0.16, c.z, c.scale, c.rot);
-      if (houseGroup) {
-        this.cottageMeshes.set(c.id, houseGroup);
-      }
+      this.spawnStoneFoundation(c.x, cy, c.z, 15.4, 13.2, 0);
+      this.buildWalkInCottage(c.id, c.x, cy + 0.16, c.z, c.isNorth, c.roofHex, c.rugHex, c.theme);
     }
 
     // 3. 北側占星高地 (預言家聖域)：高聳觀星木塔、巨石陣與發光蘑菇群
@@ -747,6 +756,330 @@ export class ThreeVillageRenderer {
     this.scene.add(group);
   }
 
+  /**
+   * 建造可實際走入的中世紀 3D 實體木屋：
+   * - 四面厚實牆體與大門開口完全對齊 map-data.ts 的碰撞箱 (15.4m x 13.2m)
+   * - 內建溫潤橡木地板、可開關鎖栓的 3D 實木大門、壁爐暖光、木床、編織地毯、餐桌椅與 6 大職業專屬擺設
+   * - 屋頂獨立成組 (roofGroup)：第三人稱進屋自動掀開屋頂俯視內裝；第一人稱進屋保留屋頂與樑柱！
+   */
+  private buildWalkInCottage(
+    id: string,
+    cx: number,
+    baseY: number,
+    cz: number,
+    isNorthRow: boolean,
+    roofHex: string,
+    rugHex: string,
+    theme: string
+  ): void {
+    const group = new THREE.Group();
+    group.position.set(cx, baseY, cz);
+
+    const W = 15.4;          // 對應 2D 寬 140 * 0.11
+    const D = 13.2;          // 對應 2D 深 120 * 0.11
+    const wallT = 1.1;       // 對應 2D 牆厚 10 * 0.11
+    const wallH = 4.2;       // 牆壁高度
+    const sideDoorW = 4.62;  // 對應 2D 門側牆 42 * 0.11 (中間留出 6.16m 寬敞門口)
+    const dirZ = isNorthRow ? 1 : -1; // 北排大門朝 +Z (南)，南排大門朝 -Z (北)
+
+    const wallMat = new THREE.MeshStandardMaterial({ color: '#f3e5ab', roughness: 0.88 });
+    const frontWallMat = new THREE.MeshStandardMaterial({ color: '#f3e5ab', roughness: 0.88 });
+    const timberMat = new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 });
+    const frontTimberMat = new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 });
+    const floorMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.82 });
+    const stoneMat = new THREE.MeshStandardMaterial({ color: '#57534e', roughness: 0.92 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: roofHex, roughness: 0.8, side: THREE.DoubleSide });
+
+    // 1. 室內溫潤橡木地板與中央編織地毯
+    const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(W - 0.4, 0.14, D - 0.4), floorMat);
+    floorMesh.position.y = 0.07;
+    floorMesh.receiveShadow = true;
+    group.add(floorMesh);
+
+    const rugBorder = new THREE.Mesh(
+      new THREE.BoxGeometry(6.8, 0.04, 5.2),
+      new THREE.MeshStandardMaterial({ color: '#d97706', roughness: 0.9 })
+    );
+    rugBorder.position.set(0, 0.15, dirZ * 0.4);
+    rugBorder.receiveShadow = true;
+    group.add(rugBorder);
+
+    const rugInner = new THREE.Mesh(
+      new THREE.BoxGeometry(6.2, 0.05, 4.6),
+      new THREE.MeshStandardMaterial({ color: rugHex, roughness: 0.92 })
+    );
+    rugInner.position.set(0, 0.16, dirZ * 0.4);
+    rugInner.receiveShadow = true;
+    group.add(rugInner);
+
+    // 2. 後牆、左右側牆與木骨橫樑 (完全貼合 map-data.ts 外牆碰撞箱)
+    const backWallZ = -dirZ * (D / 2 - wallT / 2);
+    const frontWallZ = dirZ * (D / 2 - wallT / 2);
+    const leftWallX = -(W / 2 - wallT / 2);
+    const rightWallX = W / 2 - wallT / 2;
+
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, wallH, wallT), wallMat);
+    backWall.position.set(0, wallH / 2, backWallZ);
+    backWall.castShadow = true;
+    backWall.receiveShadow = true;
+    group.add(backWall);
+
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, D), wallMat);
+    leftWall.position.set(leftWallX, wallH / 2, 0);
+    leftWall.castShadow = true;
+    leftWall.receiveShadow = true;
+    group.add(leftWall);
+
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, wallH, D), wallMat);
+    rightWall.position.set(rightWallX, wallH / 2, 0);
+    rightWall.castShadow = true;
+    rightWall.receiveShadow = true;
+    group.add(rightWall);
+
+    // 四角深胡桃木立柱與橫樑
+    for (const px of [-W / 2 + 0.35, W / 2 - 0.35]) {
+      for (const pz of [-D / 2 + 0.35, D / 2 - 0.35]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.75, wallH + 0.2, 0.75), timberMat);
+        post.position.set(px, wallH / 2, pz);
+        post.castShadow = true;
+        group.add(post);
+      }
+    }
+
+    // 東西兩側暖光窗戶
+    const winMat = new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#f59e0b',
+      emissiveIntensity: 0.9,
+      roughness: 0.2
+    });
+    for (const wx of [leftWallX, rightWallX]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(wallT + 0.14, 1.4, 2.2), winMat);
+      win.position.set(wx, 2.3, 0);
+      group.add(win);
+    }
+
+    // 3. 前牆組與可開關 3D 實木大門 (frontWallGroup)
+    const frontWallGroup = new THREE.Group();
+    const frontLeft = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW, wallH, wallT), frontWallMat);
+    frontLeft.position.set(-(W / 2 - sideDoorW / 2), wallH / 2, frontWallZ);
+    frontLeft.castShadow = true;
+    frontLeft.receiveShadow = true;
+    frontWallGroup.add(frontLeft);
+
+    const frontRight = new THREE.Mesh(new THREE.BoxGeometry(sideDoorW, wallH, wallT), frontWallMat);
+    frontRight.position.set(W / 2 - sideDoorW / 2, wallH / 2, frontWallZ);
+    frontRight.castShadow = true;
+    frontRight.receiveShadow = true;
+    frontWallGroup.add(frontRight);
+
+    // 門楣橫樑
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(W, 0.75, wallT + 0.12), frontTimberMat);
+    lintel.position.set(0, wallH - 0.35, frontWallZ);
+    lintel.castShadow = true;
+    frontWallGroup.add(lintel);
+
+    // 門框立柱
+    const doorHalfGap = (W - sideDoorW * 2) / 2; // 3.08m
+    for (const dx of [-doorHalfGap, doorHalfGap]) {
+      const framePost = new THREE.Mesh(new THREE.BoxGeometry(0.45, wallH, wallT + 0.16), frontTimberMat);
+      framePost.position.set(dx, wallH / 2, frontWallZ);
+      frontWallGroup.add(framePost);
+    }
+
+    // 可旋轉 3D 橡木門扇 (軸心設於左側門框)
+    const doorPivot = new THREE.Group();
+    doorPivot.position.set(-doorHalfGap + 0.2, 0.15, frontWallZ);
+
+    const doorWidth = doorHalfGap * 2 - 0.4;
+    const doorHeight = wallH - 0.85;
+    const doorPanel = new THREE.Mesh(
+      new THREE.BoxGeometry(doorWidth, doorHeight, 0.28),
+      new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.8 })
+    );
+    doorPanel.position.set(doorWidth / 2, doorHeight / 2, 0);
+    doorPanel.castShadow = true;
+    doorPivot.add(doorPanel);
+
+    // 門鎖橫栓 (反鎖時顯現發光紅鐵橫槓)
+    const lockBar = new THREE.Mesh(
+      new THREE.BoxGeometry(doorWidth + 0.6, 0.26, 0.42),
+      new THREE.MeshStandardMaterial({
+        color: '#ef4444',
+        emissive: '#dc2626',
+        emissiveIntensity: 1.4,
+        metalness: 0.7,
+        roughness: 0.3
+      })
+    );
+    lockBar.position.set(doorWidth / 2, doorHeight * 0.52, 0);
+    lockBar.visible = false;
+    doorPivot.add(lockBar);
+
+    frontWallGroup.add(doorPivot);
+    group.add(frontWallGroup);
+
+    // 4. 室內三大核心家具區 (100% 對應 map-data.ts 的室內家具碰撞箱座標！)
+    const backFurnZ = -dirZ * 4.1;
+
+    // (A) 左後角：中世紀實木床鋪與枕頭毛毯 (對應 x + 12..46 => 本地 X = -4.5m)
+    const bedGroup = new THREE.Group();
+    bedGroup.position.set(-4.5, 0.15, backFurnZ);
+    const bedFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(3.4, 0.55, 2.6),
+      new THREE.MeshStandardMaterial({ color: '#5c3a21', roughness: 0.85 })
+    );
+    bedFrame.position.y = 0.28;
+    bedFrame.castShadow = true;
+    bedGroup.add(bedFrame);
+
+    const headboard = new THREE.Mesh(
+      new THREE.BoxGeometry(3.4, 1.45, 0.32),
+      new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.85 })
+    );
+    headboard.position.set(0, 0.72, -dirZ * 1.15);
+    bedGroup.add(headboard);
+
+    const blanket = new THREE.Mesh(
+      new THREE.BoxGeometry(3.15, 0.25, 1.85),
+      new THREE.MeshStandardMaterial({ color: rugHex, roughness: 0.9 })
+    );
+    blanket.position.set(0, 0.62, dirZ * 0.25);
+    bedGroup.add(blanket);
+
+    const pillow = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.22, 0.62),
+      new THREE.MeshStandardMaterial({ color: '#fef9c3', roughness: 0.85 })
+    );
+    pillow.position.set(0, 0.66, -dirZ * 0.78);
+    bedGroup.add(pillow);
+    group.add(bedGroup);
+
+    // (B) 後牆中央：石砌壁爐、餘燼火光與室內暖光源 (對應 x + 56..84 => 本地 X = 0.0m)
+    const hearthGroup = new THREE.Group();
+    hearthGroup.position.set(0, 0.15, -dirZ * 4.85);
+    const hearthBody = new THREE.Mesh(new THREE.BoxGeometry(3.0, 3.6, 1.7), stoneMat);
+    hearthBody.position.y = 1.8;
+    hearthBody.castShadow = true;
+    hearthGroup.add(hearthBody);
+
+    const fireCore = new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 0.9, 0.5),
+      new THREE.MeshStandardMaterial({
+        color: '#f97316',
+        emissive: '#ea580c',
+        emissiveIntensity: 2.2
+      })
+    );
+    fireCore.position.set(0, 0.65, dirZ * 0.7);
+    hearthGroup.add(fireCore);
+
+    const indoorLight = new THREE.PointLight('#ff9e44', 1.65, 16, 1.4);
+    indoorLight.position.set(0, 2.6, dirZ * 1.5);
+    hearthGroup.add(indoorLight);
+    group.add(hearthGroup);
+
+    // (C) 右後角：實木餐桌、座椅與職業專屬擺設 (對應 x + 94..128 => 本地 X = +4.5m)
+    const tableGroup = new THREE.Group();
+    tableGroup.position.set(4.5, 0.15, backFurnZ);
+
+    const tableProto = this.modelPrototypes.get('table');
+    if (tableProto) {
+      const tbl = tableProto.clone(true);
+      tbl.scale.set(2.1, 1.7, 2.1);
+      tbl.position.set(-0.3, 0, 0);
+      tableGroup.add(tbl);
+    } else {
+      const fallbackTbl = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.95, 1.5), timberMat);
+      fallbackTbl.position.y = 0.48;
+      tableGroup.add(fallbackTbl);
+    }
+
+    const chairProto = this.modelPrototypes.get('chair');
+    if (chairProto) {
+      const ch = chairProto.clone(true);
+      ch.scale.set(1.6, 1.6, 1.6);
+      ch.position.set(-0.3, 0, dirZ * 1.15);
+      ch.rotation.y = isNorthRow ? Math.PI : 0;
+      tableGroup.add(ch);
+    }
+
+    // 根據屋主職業主題擺放專屬道具 (煉金藥瓶/占卜水晶球/農夫木桶/獵人木箱)
+    const barrelProto = this.modelPrototypes.get('barrel');
+    const crateProto = this.modelPrototypes.get('crate');
+    if (barrelProto) {
+      const b = barrelProto.clone(true);
+      b.scale.set(1.4, 1.4, 1.4);
+      b.position.set(1.35, 0, -dirZ * 0.4);
+      tableGroup.add(b);
+    }
+    if (crateProto) {
+      const cr = crateProto.clone(true);
+      cr.scale.set(1.2, 1.2, 1.2);
+      cr.position.set(1.35, 0, dirZ * 0.65);
+      tableGroup.add(cr);
+    }
+
+    if (theme === 'ALCHEMIST' || theme === 'SEER') {
+      // 桌面上發光的煉金藥劑瓶與占卜水晶球
+      const orbColor = theme === 'SEER' ? '#c084fc' : '#34d399';
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.32, 12, 12),
+        new THREE.MeshStandardMaterial({
+          color: orbColor,
+          emissive: orbColor,
+          emissiveIntensity: 1.8,
+          roughness: 0.15
+        })
+      );
+      orb.position.set(-0.3, 1.32, 0);
+      tableGroup.add(orb);
+    }
+    group.add(tableGroup);
+
+    // 5. 可掀式斜頂屋頂與煙囪組 (roofGroup：第三人稱進屋自動隱藏以俯瞰室內，第一人稱進屋保持顯示！)
+    const roofGroup = new THREE.Group();
+    roofGroup.position.y = wallH;
+
+    const roofPitchH = 3.6;
+    const slopeLen = Math.hypot(D / 2 + 1.1, roofPitchH);
+    const slopeAngle = Math.atan2(roofPitchH, D / 2 + 1.1);
+
+    const roofHalfFront = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.28, slopeLen), roofMat);
+    roofHalfFront.position.set(0, roofPitchH / 2 - 0.1, (D / 4 + 0.45));
+    roofHalfFront.rotation.x = slopeAngle;
+    roofHalfFront.castShadow = true;
+    roofGroup.add(roofHalfFront);
+
+    const roofHalfBack = new THREE.Mesh(new THREE.BoxGeometry(W + 1.4, 0.28, slopeLen), roofMat);
+    roofHalfBack.position.set(0, roofPitchH / 2 - 0.1, -(D / 4 + 0.45));
+    roofHalfBack.rotation.x = -slopeAngle;
+    roofHalfBack.castShadow = true;
+    roofGroup.add(roofHalfBack);
+
+    const ridgeBeam = new THREE.Mesh(new THREE.BoxGeometry(W + 1.6, 0.42, 0.45), timberMat);
+    ridgeBeam.position.set(0, roofPitchH - 0.05, 0);
+    roofGroup.add(ridgeBeam);
+
+    // 石砌煙囪
+    const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.8, 1.4), stoneMat);
+    chimney.position.set(0, roofPitchH * 0.65, -dirZ * 4.5);
+    chimney.castShadow = true;
+    roofGroup.add(chimney);
+
+    group.add(roofGroup);
+    this.scene.add(group);
+
+    this.cottageInstances.set(id, {
+      group,
+      roofGroup,
+      frontWallGroup,
+      doorPivot,
+      lockBar,
+      isNorthRow
+    });
+  }
+
   private spawnModel(key: string, x: number, y: number, z: number, scale: number = 1.0, rotationY: number = 0): THREE.Group | null {
     const proto = this.modelPrototypes.get(key);
     if (!proto) return null;
@@ -856,18 +1189,35 @@ export class ThreeVillageRenderer {
       this.playerLantern.position.set(targetX, groundY + 2.2, targetZ);
       this.playerLantern.intensity = snapshot.phase === GamePhase.NIGHT ? (this.isFirstPerson ? 2.4 : 1.8) : 0;
 
-      // 當本地玩家進入某間木屋時，將該棟木屋設為半透明透視，方便看清室內角色與門鎖操作
-      for (const [cid, houseGroup] of this.cottageMeshes.entries()) {
+      // 動態更新 6 間木屋的：
+      // 1. 3D 門扇開闔角度與發光紅鐵門栓 (上鎖時關門並亮起鐵栓，未鎖時敞開 78° 可直接走入)
+      // 2. 屋頂透視 (第三人稱進屋自動掀開屋頂俯視完整內裝；第一人稱進屋保留屋頂感受真實室內空間)
+      for (const [cid, inst] of this.cottageInstances.entries()) {
+        const cottageData = _map.cottages.find((c) => c.id === cid);
+        const isLocked = Boolean(cottageData?.isLocked);
         const isInsideThis = localPlayer.insideCottageId === cid;
-        houseGroup.traverse((node) => {
-          if ((node as THREE.Mesh).isMesh) {
+
+        // 門扇平滑開闔動畫
+        const openAngle = inst.isNorthRow ? -1.35 : 1.35;
+        const targetDoorRot = isLocked ? 0 : openAngle;
+        inst.doorPivot.rotation.y = THREE.MathUtils.lerp(
+          inst.doorPivot.rotation.y,
+          targetDoorRot,
+          Math.min(1, deltaSec * 10)
+        );
+        inst.lockBar.visible = isLocked;
+
+        // 第三人稱進屋自動掀開屋頂並半透明化前牆；第一人稱進屋則保留屋頂與實心牆面
+        inst.roofGroup.visible = !(isInsideThis && !this.isFirstPerson);
+        const frontOpacity = isInsideThis && !this.isFirstPerson ? 0.25 : 1.0;
+        inst.frontWallGroup.traverse((node) => {
+          if ((node as THREE.Mesh).isMesh && node !== inst.lockBar) {
             const mesh = node as THREE.Mesh;
             const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
             for (const m of mats) {
               if (m) {
-                m.transparent = isInsideThis;
-                m.opacity = isInsideThis ? (this.isFirstPerson ? 0.55 : 0.28) : 1.0;
-                m.needsUpdate = true;
+                m.transparent = frontOpacity < 1.0;
+                m.opacity = frontOpacity;
               }
             }
           }

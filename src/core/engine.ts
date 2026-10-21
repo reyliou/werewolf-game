@@ -53,9 +53,17 @@ export class GameEngine {
     targetX = Math.max(this.playerRadius + 20, Math.min(this.map.width - this.playerRadius - 20, targetX));
     targetY = Math.max(this.playerRadius + 20, Math.min(this.map.height - this.playerRadius - 20, targetY));
 
-    // 碰撞檢查 (X 軸)
+    // 動態收集所有碰撞障礙箱：包含靜態牆壁/家具 + 已上鎖木屋的門扇碰撞箱
+    const activeWalls = [...this.map.walls];
+    for (const cottage of this.map.cottages) {
+      if (cottage.isLocked && player.insideCottageId !== cottage.id && player.assignedCottageId !== cottage.id) {
+        activeWalls.push(cottage.doorRect);
+      }
+    }
+
+    // 碰撞檢查 (X 軸滑動物理)
     let collisionX = false;
-    for (const wall of this.map.walls) {
+    for (const wall of activeWalls) {
       if (checkCircleRectCollision(targetX, player.y, this.playerRadius, wall)) {
         collisionX = true;
         break;
@@ -63,9 +71,9 @@ export class GameEngine {
     }
     if (collisionX) targetX = player.x;
 
-    // 碰撞檢查 (Y 軸)
+    // 碰撞檢查 (Y 軸滑動物理)
     let collisionY = false;
-    for (const wall of this.map.walls) {
+    for (const wall of activeWalls) {
       if (checkCircleRectCollision(player.x, targetY, this.playerRadius, wall)) {
         collisionY = true;
         break;

@@ -1,6 +1,6 @@
 /**
  * @file map-data.ts
- * @description 狼人村莊地圖：6間獨立木屋、金黃小麥田、肉品燻房、中央火堆與周邊圍欄
+ * @description 狼人村莊地圖：6間可走入式獨立木屋 (含室內家具碰撞箱)、大穀倉、瞭望塔、中央火堆、小麥田與肉品燻房
  */
 
 export interface Rect {
@@ -14,10 +14,10 @@ export interface Cottage {
   id: string;
   name: string;
   ownerIndex: number;
-  rect: Rect;            // 木屋本體矩形
-  doorRect: Rect;        // 門口出入口感應區 (踩入即進屋)
+  rect: Rect;            // 木屋本體室內外邊界矩形
+  doorRect: Rect;        // 門口出入口感應與門扇碰撞區
   interiorColor: string;
-  isLocked?: boolean;    // 是否上鎖防範狼人
+  isLocked?: boolean;    // 是否上鎖防範狼人 (上鎖時門扇關閉並阻擋外部碰撞)
 }
 
 export interface WheatPatch {
@@ -41,7 +41,49 @@ export interface VillageMap {
   cottages: Cottage[];
   wheatPatches: WheatPatch[];
   meatRacks: MeatRack[];
-  walls: Rect[];         // 碰撞障礙牆（含小屋四壁，門口除外）
+  walls: Rect[];         // 靜態碰撞障礙箱（含木屋四面牆壁、室內家具、穀倉、瞭望塔、火堆與外圍柵欄）
+}
+
+/**
+ * 依據木屋左上角 (x, y) 與朝向 (isNorthRow: 大門朝南或朝北) 自動生成：
+ * 1. 四面厚實牆壁碰撞箱 (留出中央 56px 寬敞大門通道)
+ * 2. 室內三大核心家具碰撞箱 (木床、石砌壁爐、工作桌/儲物櫃)，保留中央寬敞走道
+ */
+function createCottageCollisionBoxes(x: number, y: number, isNorthRow: boolean): Rect[] {
+  const w = 140;
+  const h = 120;
+  const wallThick = 10;
+  const sideDoorWallW = 42; // (140 - 42*2) = 56px 寬敞門口通道
+
+  if (isNorthRow) {
+    // 北排木屋 (1~3號)：大門在南側 (y + h)
+    return [
+      // 外牆：北後牆、西側牆、東側牆、南前左牆、南前右牆
+      { x, y, width: w, height: wallThick },
+      { x, y, width: wallThick, height: h },
+      { x: x + w - wallThick, y, width: wallThick, height: h },
+      { x, y: y + h - wallThick, width: sideDoorWallW, height: wallThick },
+      { x: x + w - sideDoorWallW, y: y + h - wallThick, width: sideDoorWallW, height: wallThick },
+      // 室內家具碰撞箱：左上角木床、後牆中央壁爐、右上角工作桌與木桶
+      { x: x + 12, y: y + 12, width: 34, height: 26 },
+      { x: x + 56, y: y + 10, width: 28, height: 16 },
+      { x: x + 94, y: y + 12, width: 34, height: 24 }
+    ];
+  } else {
+    // 南排木屋 (4~6號)：大門在北側 (y)
+    return [
+      // 外牆：南後牆、西側牆、東側牆、北前左牆、北前右牆
+      { x, y: y + h - wallThick, width: w, height: wallThick },
+      { x, y, width: wallThick, height: h },
+      { x: x + w - wallThick, y, width: wallThick, height: h },
+      { x, y, width: sideDoorWallW, height: wallThick },
+      { x: x + w - sideDoorWallW, y, width: sideDoorWallW, height: wallThick },
+      // 室內家具碰撞箱：左下角木床、後牆中央壁爐、右下角工作桌與木桶
+      { x: x + 12, y: y + h - 38, width: 34, height: 26 },
+      { x: x + 56, y: y + h - 26, width: 28, height: 16 },
+      { x: x + 94, y: y + h - 36, width: 34, height: 24 }
+    ];
+  }
 }
 
 export const VILLAGE_MAP: VillageMap = {
@@ -49,55 +91,55 @@ export const VILLAGE_MAP: VillageMap = {
   height: 1000,
   bonfire: { x: 700, y: 500, radius: 45 },
   cottages: [
-    // 北側 3 間小屋
+    // 北側 3 間小屋 (大門朝南)
     {
       id: 'cottage-1',
-      name: '1號木屋 (亞歷山大小屋)',
+      name: '1號木屋 (亞歷山大農夫屋)',
       ownerIndex: 0,
       rect: { x: 200, y: 80, width: 140, height: 120 },
-      doorRect: { x: 250, y: 190, width: 40, height: 25 },
-      interiorColor: '#3b2f2f'
+      doorRect: { x: 242, y: 188, width: 56, height: 24 },
+      interiorColor: '#8b5a2b'
     },
     {
       id: 'cottage-2',
-      name: '2號木屋 (艾蓮娜小屋)',
+      name: '2號木屋 (艾蓮娜煉金屋)',
       ownerIndex: 1,
       rect: { x: 630, y: 80, width: 140, height: 120 },
-      doorRect: { x: 680, y: 190, width: 40, height: 25 },
-      interiorColor: '#3b2f2f'
+      doorRect: { x: 672, y: 188, width: 56, height: 24 },
+      interiorColor: '#1e3a8a'
     },
     {
       id: 'cottage-3',
-      name: '3號木屋 (萊昂小屋)',
+      name: '3號木屋 (萊昂獵人屋)',
       ownerIndex: 2,
       rect: { x: 1060, y: 80, width: 140, height: 120 },
-      doorRect: { x: 1110, y: 190, width: 40, height: 25 },
-      interiorColor: '#3b2f2f'
+      doorRect: { x: 1102, y: 188, width: 56, height: 24 },
+      interiorColor: '#78350f'
     },
-    // 南側 3 間小屋
+    // 南側 3 間小屋 (大門朝北)
     {
       id: 'cottage-4',
-      name: '4號木屋 (諾亞小屋)',
+      name: '4號木屋 (諾亞占星屋)',
       ownerIndex: 3,
       rect: { x: 200, y: 800, width: 140, height: 120 },
-      doorRect: { x: 250, y: 790, width: 40, height: 25 },
-      interiorColor: '#3b2f2f'
+      doorRect: { x: 242, y: 788, width: 56, height: 24 },
+      interiorColor: '#581c87'
     },
     {
       id: 'cottage-5',
-      name: '5號木屋 (卡爾小屋)',
+      name: '5號木屋 (卡爾哨站屋)',
       ownerIndex: 4,
       rect: { x: 630, y: 800, width: 140, height: 120 },
-      doorRect: { x: 680, y: 790, width: 40, height: 25 },
-      interiorColor: '#3b2f2f'
+      doorRect: { x: 672, y: 788, width: 56, height: 24 },
+      interiorColor: '#14532d'
     },
     {
       id: 'cottage-6',
-      name: '6號木屋 (洛基小屋)',
+      name: '6號木屋 (洛基領主屋)',
       ownerIndex: 5,
       rect: { x: 1060, y: 800, width: 140, height: 120 },
-      doorRect: { x: 1110, y: 790, width: 40, height: 25 },
-      interiorColor: '#3b2f2f'
+      doorRect: { x: 1102, y: 788, width: 56, height: 24 },
+      interiorColor: '#7f1d1d'
     }
   ],
   wheatPatches: [
@@ -112,53 +154,28 @@ export const VILLAGE_MAP: VillageMap = {
     { id: 'meat-rack-2', rect: { x: 1110, y: 500, width: 210, height: 160 }, meatAvailable: 8 }
   ],
   walls: [
-    // 外圍邊界大柵欄
+    // 1. 外圍邊界大柵欄
     { x: 0, y: 0, width: 1400, height: 16 },
     { x: 0, y: 984, width: 1400, height: 16 },
     { x: 0, y: 0, width: 16, height: 1000 },
     { x: 1384, y: 0, width: 16, height: 1000 },
 
-    // 小屋 1 牆壁 (中心 270, 140 -> 3D: -47.3, -39.6；加寬南側大門通道 x: 236~304 確保順暢進出)
-    { x: 200, y: 80, width: 140, height: 12 },
-    { x: 200, y: 80, width: 12, height: 120 },
-    { x: 328, y: 80, width: 12, height: 120 },
-    { x: 200, y: 188, width: 36, height: 12 },
-    { x: 304, y: 188, width: 36, height: 12 },
+    // 2. 中央火堆石圈碰撞箱 (防止角色直接踩進火焰中心)
+    { x: 688, y: 488, width: 24, height: 24 },
 
-    // 小屋 2 牆壁 (中心 700, 140 -> 3D: 0.0, -39.6；大門通道 x: 666~734)
-    { x: 630, y: 80, width: 140, height: 12 },
-    { x: 630, y: 80, width: 12, height: 120 },
-    { x: 758, y: 80, width: 12, height: 120 },
-    { x: 630, y: 188, width: 36, height: 12 },
-    { x: 734, y: 188, width: 36, height: 12 },
+    // 3. 西側農莊大穀倉 (Barn: 3D -68, -2 -> 2D 中心 82, 482) 實體碰撞箱
+    { x: 24, y: 428, width: 112, height: 108 },
 
-    // 小屋 3 牆壁 (中心 1130, 140 -> 3D: +47.3, -39.6；大門通道 x: 1096~1164)
-    { x: 1060, y: 80, width: 140, height: 12 },
-    { x: 1060, y: 80, width: 12, height: 120 },
-    { x: 1188, y: 80, width: 12, height: 120 },
-    { x: 1060, y: 188, width: 36, height: 12 },
-    { x: 1164, y: 188, width: 36, height: 12 },
+    // 4. 北側預言家觀星瞭望塔 (Watchtower: 3D -18, -46 -> 2D 中心 536, 82) 實體碰撞箱
+    { x: 518, y: 64, width: 36, height: 36 },
 
-    // 小屋 4 牆壁 (中心 270, 860 -> 3D: -47.3, +39.6；北側大門通道 x: 236~304)
-    { x: 200, y: 908, width: 140, height: 12 },
-    { x: 200, y: 800, width: 12, height: 120 },
-    { x: 328, y: 800, width: 12, height: 120 },
-    { x: 200, y: 800, width: 36, height: 12 },
-    { x: 304, y: 800, width: 36, height: 12 },
-
-    // 小屋 5 牆壁 (中心 700, 860 -> 3D: 0.0, +39.6；北側大門通道 x: 666~734)
-    { x: 630, y: 908, width: 140, height: 12 },
-    { x: 630, y: 800, width: 12, height: 120 },
-    { x: 758, y: 800, width: 12, height: 120 },
-    { x: 630, y: 800, width: 36, height: 12 },
-    { x: 734, y: 800, width: 36, height: 12 },
-
-    // 小屋 6 牆壁 (中心 1130, 860 -> 3D: +47.3, +39.6；北側大門通道 x: 1096~1164)
-    { x: 1060, y: 908, width: 140, height: 12 },
-    { x: 1060, y: 800, width: 12, height: 120 },
-    { x: 1188, y: 800, width: 12, height: 120 },
-    { x: 1060, y: 800, width: 36, height: 12 },
-    { x: 1164, y: 800, width: 36, height: 12 }
+    // 5. 六間木屋的四面牆壁與室內家具碰撞箱
+    ...createCottageCollisionBoxes(200, 80, true),
+    ...createCottageCollisionBoxes(630, 80, true),
+    ...createCottageCollisionBoxes(1060, 80, true),
+    ...createCottageCollisionBoxes(200, 800, false),
+    ...createCottageCollisionBoxes(630, 800, false),
+    ...createCottageCollisionBoxes(1060, 800, false)
   ]
 };
 
