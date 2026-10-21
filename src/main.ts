@@ -1,135 +1,36 @@
 /**
  * @file main.ts
- * @description 前端啟動入口：驅動 2D 畫布、輸入監聽與 HUD 即時反應
+ * @description 前端啟動入口：支援 P2P 開房/加入、單機沙盒、2D 畫布與 HUD 即時反應
  */
 
-import { GameEngine } from './core/engine';
-import { GamePhase, PlayerState, RoleType } from './core/types';
+import { DEFAULT_MAP } from './core/map-data';
+import { GamePhase, GameStateSnapshot, PlayerState, RoleType } from './core/types';
 import { InputController } from './input/input-controller';
+import { P2PClient } from './net/p2p-client';
+import { P2PHost } from './net/p2p-host';
+import { generateRoomCode } from './net/peer-manager';
 import { CanvasRenderer } from './render/canvas-view';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const renderer = new CanvasRenderer(canvas);
 const input = new InputController(canvas);
 
-// 初始化單機/Host 權威引擎
-const LOCAL_PLAYER_ID = 'local-p1';
-const engine = new GameEngine(LOCAL_PLAYER_ID);
+// DOM 元素參照
+const lobbyModal = document.getElementById('lobby-modal')!;
+const inputNickname = document.getElementById('input-nickname') as HTMLInputElement;
+const inputRoomCode = document.getElementById('input-roomcode') as HTMLInputElement;
+const btnCreateRoom = document.getElementById('btn-create-room')!;
+const btnJoinRoom = document.getElementById('btn-join-room')!;
+const btnSoloSandbox = document.getElementById('btn-solo-sandbox')!;
+const hostRoomPanel = document.getElementById('host-room-panel')!;
+const clientWaitingPanel = document.getElementById('client-waiting-panel')!;
+const displayRoomCode = document.getElementById('display-room-code')!;
+const btnCopyCode = document.getElementById('btn-copy-code')!;
+const playerStatusList = document.getElementById('player-status-list')!;
+const btnStartGame = document.getElementById('btn-start-game')!;
+const mainActions = document.getElementById('main-actions')!;
+const joinSection = document.getElementById('join-section')!;
 
-// 建立 6 名初始模擬玩家進行視圖走動驗證
-const mockPlayers: PlayerState[] = [
-  {
-    id: LOCAL_PLAYER_ID,
-    name: '偵探-亞歷山大',
-    role: RoleType.DETECTIVE,
-    faction: 'ALIGNED',
-    isAlive: true,
-    x: 600,
-    y: 500,
-    rotation: 0,
-    speed: 160,
-    sanity: 100,
-    skillCooldownRemaining: 0,
-    hasShield: false,
-    isStealthed: false,
-    color: '#38bdf8'
-  },
-  {
-    id: 'bot-2',
-    name: '醫師-艾蓮娜',
-    role: RoleType.DOCTOR,
-    faction: 'ALIGNED',
-    isAlive: true,
-    x: 640,
-    y: 350,
-    rotation: 0,
-    speed: 150,
-    sanity: 100,
-    skillCooldownRemaining: 0,
-    hasShield: true,
-    isStealthed: false,
-    color: '#10b981'
-  },
-  {
-    id: 'bot-3',
-    name: '封印師-萊昂',
-    role: RoleType.SEALER,
-    faction: 'ALIGNED',
-    isAlive: true,
-    x: 200,
-    y: 180,
-    rotation: 0,
-    speed: 150,
-    sanity: 100,
-    skillCooldownRemaining: 0,
-    hasShield: false,
-    isStealthed: false,
-    color: '#a855f7'
-  },
-  {
-    id: 'bot-4',
-    name: '學者-諾亞',
-    role: RoleType.SCHOLAR,
-    faction: 'ALIGNED',
-    isAlive: true,
-    x: 1000,
-    y: 180,
-    rotation: 0,
-    speed: 150,
-    sanity: 100,
-    skillCooldownRemaining: 0,
-    hasShield: false,
-    isStealthed: false,
-    color: '#f59e0b'
-  },
-  {
-    id: 'bot-5',
-    name: '幽影-卡爾',
-    role: RoleType.STALKER,
-    faction: 'SHADOW',
-    isAlive: true,
-    x: 1000,
-    y: 720,
-    rotation: 0,
-    speed: 175,
-    sanity: 100,
-    skillCooldownRemaining: 0,
-    hasShield: false,
-    isStealthed: false,
-    color: '#ef4444'
-  },
-  {
-    id: 'bot-6',
-    name: '狂徒-洛基',
-    role: RoleType.TRICKSTER,
-    faction: 'NEUTRAL',
-    isAlive: true,
-    x: 200,
-    y: 720,
-    rotation: 0,
-    speed: 155,
-    sanity: 100,
-    skillCooldownRemaining: 0,
-    hasShield: false,
-    isStealthed: false,
-    color: '#ec4899'
-  }
-];
-
-// 註冊玩家並開啟遊戲
-for (const p of mockPlayers) {
-  engine.fsm.addPlayer(p);
-}
-engine.fsm.startGame({
-  [LOCAL_PLAYER_ID]: RoleType.DETECTIVE,
-  'bot-2': RoleType.DOCTOR,
-  'bot-3': RoleType.SEALER,
-  'bot-4': RoleType.SCHOLAR,
-  'bot-5': RoleType.STALKER,
-  'bot-6': RoleType.TRICKSTER
-});
-
-// UI 元件參照
 const hudRole = document.getElementById('hud-role')!;
 const hudRitual = document.getElementById('hud-ritual')!;
 const hudTimer = document.getElementById('hud-timer')!;
@@ -140,32 +41,200 @@ const btnSkill = document.getElementById('btn-skill')!;
 const btnEmergency = document.getElementById('btn-emergency')!;
 const btnSkipVote = document.getElementById('btn-skip-vote')!;
 
-// 綁定主動技能按鈕
+// 連線狀態變數
+type GameMode = 'NONE' | 'HOST' | 'CLIENT' | 'SOLO';
+let currentMode: GameMode = 'NONE';
+let hostInstance: P2PHost | null = null;
+let clientInstance: P2PClient | null = null;
+let localPlayerId: string = '';
+let latestSnapshot: GameStateSnapshot | null = null;
+
+// ==========================================
+// 1. 建立房間 (Host 流程)
+// ==========================================
+btnCreateRoom.addEventListener('click', async () => {
+  const name = inputNickname.value.trim() || '房主';
+  const code = generateRoomCode();
+  currentMode = 'HOST';
+  localPlayerId = 'host-' + code;
+
+  btnCreateRoom.setAttribute('disabled', 'true');
+  btnCreateRoom.innerText = '建立連線中...';
+
+  try {
+    hostInstance = new P2PHost(code, name);
+    await hostInstance.start((count) => {
+      playerStatusList.innerHTML = `已連入成員: <strong>${count} / 6</strong> 名玩家<br/>`;
+      const players = hostInstance!.engine.fsm.getSnapshot().players;
+      for (const id in players) {
+        playerStatusList.innerHTML += `• ${players[id].name} ${id === localPlayerId ? '(房主/你)' : ''}<br/>`;
+      }
+    });
+
+    displayRoomCode.innerText = code;
+    mainActions.style.display = 'none';
+    joinSection.style.display = 'none';
+    hostRoomPanel.style.display = 'block';
+    playerStatusList.innerHTML = `已連入成員: <strong>1 / 6</strong><br/>• ${name} (房主/你)<br/>`;
+  } catch (err) {
+    alert('房主建立房間失敗，請重試: ' + err);
+    btnCreateRoom.removeAttribute('disabled');
+    btnCreateRoom.innerText = '🏠 建立房間 (Host)';
+  }
+});
+
+btnCopyCode.addEventListener('click', () => {
+  const code = displayRoomCode.innerText;
+  navigator.clipboard.writeText(code).then(() => {
+    btnCopyCode.innerText = '✅ 已複製代碼！';
+    setTimeout(() => {
+      btnCopyCode.innerText = '📋 複製房間代碼';
+    }, 2000);
+  });
+});
+
+btnStartGame.addEventListener('click', () => {
+  if (!hostInstance) return;
+  const started = hostInstance.startGame();
+  if (started) {
+    lobbyModal.style.display = 'none';
+  } else {
+    alert('需要至少 2 名以上玩家或點擊下方單機沙盒測試！');
+  }
+});
+
+// ==========================================
+// 2. 加入房間 (Client 流程)
+// ==========================================
+btnJoinRoom.addEventListener('click', async () => {
+  const name = inputNickname.value.trim() || '訪客';
+  const code = inputRoomCode.value.trim().toUpperCase();
+
+  if (!code) {
+    alert('請輸入 6 位數房間代碼 (例如: WW-XXXX)');
+    return;
+  }
+
+  currentMode = 'CLIENT';
+  btnJoinRoom.setAttribute('disabled', 'true');
+  btnJoinRoom.innerText = '連線加入中...';
+
+  clientInstance = new P2PClient(code, name, {
+    onConnected: () => {
+      console.log('[Main] 已建立 Peer 管道');
+    },
+    onJoined: (_role, _hostId) => {
+      localPlayerId = clientInstance!.playerId;
+      mainActions.style.display = 'none';
+      joinSection.style.display = 'none';
+      clientWaitingPanel.style.display = 'block';
+    },
+    onStateSync: (snapshot) => {
+      latestSnapshot = snapshot;
+      if (snapshot.phase !== GamePhase.LOBBY && lobbyModal.style.display !== 'none') {
+        lobbyModal.style.display = 'none';
+      }
+    },
+    onError: (err) => {
+      alert('連線失敗: ' + err.message);
+      btnJoinRoom.removeAttribute('disabled');
+      btnJoinRoom.innerText = '🔗 連線加入 (Join)';
+    }
+  });
+
+  try {
+    await clientInstance.connect();
+  } catch (err) {
+    alert('無法連線到該房間: ' + err);
+    btnJoinRoom.removeAttribute('disabled');
+    btnJoinRoom.innerText = '🔗 連線加入 (Join)';
+  }
+});
+
+// ==========================================
+// 3. 單機沙盒模式 (Solo Sandbox)
+// ==========================================
+btnSoloSandbox.addEventListener('click', () => {
+  currentMode = 'SOLO';
+  const soloCode = 'SOLO-DEBUG';
+  localPlayerId = 'host-' + soloCode;
+  hostInstance = new P2PHost(soloCode, inputNickname.value.trim() || '研究員');
+
+  // 加入 5 名沙盒機器人
+  const mockRoles = [RoleType.DOCTOR, RoleType.SEALER, RoleType.SCHOLAR, RoleType.STALKER, RoleType.TRICKSTER];
+  const mockNames = ['醫師-艾蓮娜', '封印師-萊昂', '學者-諾亞', '幽影-卡爾', '狂徒-洛基'];
+
+  for (let i = 0; i < 5; i++) {
+    const botId = `bot-${i + 1}`;
+    const p: PlayerState = {
+      id: botId,
+      name: mockNames[i],
+      role: mockRoles[i],
+      faction: mockRoles[i] === RoleType.STALKER ? 'SHADOW' : mockRoles[i] === RoleType.TRICKSTER ? 'NEUTRAL' : 'ALIGNED',
+      isAlive: true,
+      x: 200 + i * 180,
+      y: 200 + (i % 2 === 0 ? 100 : 350),
+      rotation: 0,
+      speed: 150,
+      sanity: 100,
+      skillCooldownRemaining: 0,
+      hasShield: i === 0,
+      isStealthed: false,
+      color: '#cbd5e1'
+    };
+    hostInstance.engine.fsm.addPlayer(p);
+  }
+
+  hostInstance.startGame();
+  lobbyModal.style.display = 'none';
+});
+
+// ==========================================
+// 4. 輸入與按鈕交互綁定
+// ==========================================
 input.registerSkillHandler(() => {
-  const res = engine.handleSkillCast(LOCAL_PLAYER_ID);
-  console.log(`[技能] ${res.message}`);
+  triggerSkillAction();
 });
 btnSkill.addEventListener('click', () => {
-  const res = engine.handleSkillCast(LOCAL_PLAYER_ID);
-  console.log(`[技能] ${res.message}`);
+  triggerSkillAction();
 });
 
-// 綁定敲響警鐘按鈕
+function triggerSkillAction() {
+  if (currentMode === 'HOST' || currentMode === 'SOLO') {
+    hostInstance?.engine.handleSkillCast(localPlayerId);
+  } else if (currentMode === 'CLIENT') {
+    clientInstance?.sendInput(0, 0, 0, 'SKILL');
+  }
+}
+
 input.registerInteractHandler(() => {
-  const res = engine.handleTriggerEmergency(LOCAL_PLAYER_ID);
-  console.log(`[警鐘] ${res.message}`);
+  triggerEmergencyAction();
 });
 btnEmergency.addEventListener('click', () => {
-  const res = engine.handleTriggerEmergency(LOCAL_PLAYER_ID);
-  console.log(`[警鐘] ${res.message}`);
+  triggerEmergencyAction();
 });
+
+function triggerEmergencyAction() {
+  if (currentMode === 'HOST' || currentMode === 'SOLO') {
+    const res = hostInstance?.engine.handleTriggerEmergency(localPlayerId);
+    console.log(`[警鐘] ${res?.message}`);
+  } else if (currentMode === 'CLIENT') {
+    clientInstance?.triggerEmergency();
+  }
+}
 
 btnSkipVote.addEventListener('click', () => {
-  engine.fsm.castVote(LOCAL_PLAYER_ID, 'SKIP');
+  if (currentMode === 'HOST' || currentMode === 'SOLO') {
+    hostInstance?.engine.fsm.castVote(localPlayerId, 'SKIP');
+  } else if (currentMode === 'CLIENT') {
+    clientInstance?.castVote('SKIP');
+  }
 });
 
-// 投票面板產生函式
-function updateMeetingUI(snapshot: ReturnType<typeof engine.fsm.getSnapshot>) {
+// ==========================================
+// 5. 會議 UI 更新
+// ==========================================
+function updateMeetingUI(snapshot: GameStateSnapshot) {
   if (snapshot.phase === GamePhase.MEETING_CALLED || snapshot.phase === GamePhase.VOTING) {
     meetingModal.style.display = 'flex';
     votingTimer.innerText = `剩餘 ${Math.ceil(snapshot.phaseRemainingTime)}s`;
@@ -178,7 +247,11 @@ function updateMeetingUI(snapshot: ReturnType<typeof engine.fsm.getSnapshot>) {
         btn.className = 'vote-btn';
         btn.innerText = `投給: ${p.name}`;
         btn.onclick = () => {
-          engine.fsm.castVote(LOCAL_PLAYER_ID, p.id);
+          if (currentMode === 'HOST' || currentMode === 'SOLO') {
+            hostInstance?.engine.fsm.castVote(localPlayerId, p.id);
+          } else if (currentMode === 'CLIENT') {
+            clientInstance?.castVote(p.id);
+          }
           btn.style.borderColor = '#38bdf8';
         };
         voteOptions.appendChild(btn);
@@ -190,32 +263,48 @@ function updateMeetingUI(snapshot: ReturnType<typeof engine.fsm.getSnapshot>) {
   }
 }
 
-// 主渲染迴圈
+// ==========================================
+// 6. 主渲染與主循環
+// ==========================================
 let lastTime = performance.now();
+
 function gameLoop(now: number) {
   const deltaSec = (now - lastTime) / 1000;
   lastTime = now;
 
-  // 1. 取得本機輸入並更新本機玩家座標
-  const snapshot = engine.fsm.getSnapshot();
-  const localPlayer = snapshot.players[LOCAL_PLAYER_ID];
-  if (localPlayer) {
-    const { dx, dy, rotation } = input.getMovement(localPlayer.x, localPlayer.y);
-    engine.handlePlayerMove(LOCAL_PLAYER_ID, dx, dy, rotation, deltaSec);
+  let activeSnapshot: GameStateSnapshot | null = null;
+
+  if (currentMode === 'HOST' || currentMode === 'SOLO') {
+    if (hostInstance) {
+      const snap = hostInstance.engine.fsm.getSnapshot();
+      const me = snap.players[localPlayerId];
+      if (me && snap.phase === GamePhase.FREE_ROAM) {
+        const { dx, dy, rotation } = input.getMovement(me.x, me.y);
+        hostInstance.engine.handlePlayerMove(localPlayerId, dx, dy, rotation, deltaSec);
+      }
+      activeSnapshot = hostInstance.engine.update(deltaSec);
+    }
+  } else if (currentMode === 'CLIENT') {
+    activeSnapshot = latestSnapshot;
+    if (activeSnapshot && clientInstance) {
+      const me = activeSnapshot.players[localPlayerId];
+      if (me && activeSnapshot.phase === GamePhase.FREE_ROAM) {
+        const { dx, dy, rotation } = input.getMovement(me.x, me.y);
+        clientInstance.sendInput(dx, dy, rotation);
+      }
+    }
   }
 
-  // 2. 推進遊戲引擎 Tick
-  const updatedSnapshot = engine.update(deltaSec);
+  // 畫面渲染與 HUD 更新
+  if (activeSnapshot) {
+    const me = activeSnapshot.players[localPlayerId];
+    hudRole.innerText = me ? `${me.name} [${me.role}]` : '旁觀中';
+    hudRitual.innerText = `${activeSnapshot.ritualProgress.toFixed(1)}%`;
+    hudTimer.innerText = `${Math.ceil(activeSnapshot.phaseRemainingTime)}s`;
 
-  // 3. 更新 HUD
-  hudRole.innerText = `${localPlayer?.name || '未知'} [${localPlayer?.role}]`;
-  hudRitual.innerText = `${updatedSnapshot.ritualProgress.toFixed(1)}%`;
-  hudTimer.innerText = `${Math.ceil(updatedSnapshot.phaseRemainingTime)}s`;
-
-  updateMeetingUI(updatedSnapshot);
-
-  // 4. 繪製 2D 畫面
-  renderer.render(updatedSnapshot, engine.map, LOCAL_PLAYER_ID);
+    updateMeetingUI(activeSnapshot);
+    renderer.render(activeSnapshot, DEFAULT_MAP, localPlayerId);
+  }
 
   requestAnimationFrame(gameLoop);
 }
