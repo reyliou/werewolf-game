@@ -18,6 +18,7 @@
 
 | 資產名稱 | 類型 | 授權協議 | 作者 / 出處 | 備註 |
 | :--- | :--- | :--- | :--- | :--- |
+| **Simple Nature Pack (User Uploaded)** | 3D Low-Poly 自然環境物件 (FBX 轉 GLB) | 使用者授權素材 (Royalty-Free / CC) | 上傳壓縮包解壓縮 | 透過 Blender 5.2 自動轉換並烘焙 `SimpleNature_Texture_01.png` 貼圖為 24 份 `.glb` 自然模型 (樹木/岩石/灌木/花草/蘑菇) |
 | **LowPoly_Farm_02.blend** | 3D Low-Poly 農莊村莊模型庫 (本機萃取) | 使用者授權素材 (CC / Royalty-Free) | `c:\Users\reyliou\Downloads\LowPoly_Farm_02.blend` | 透過 Blender 5.2 背景導出為 `house_01.glb`, `bonfire.glb`, `wheat_crop.glb`, `bench.glb`, `tree_01.glb` 等 |
 | **Kenney Fantasy Town Kit** | 3D Low-Poly 模組化村莊與小屋 (glTF/GLB) | CC0 1.0 Universal (Public Domain) | Kenney (https://kenney.nl/assets/fantasy-town-kit) | 160+ 個中世紀房屋、屋頂、門窗、農作物與圍欄 |
 | **Quaternius Medieval Village MegaKit** | 3D Low-Poly 村莊室內外建築 (glTF/FBX) | CC0 1.0 Universal (Public Domain) | Quaternius (https://quaternius.itch.io/medieval-village-megakit) | 300+ 模組化建築物件，支援室內外無縫穿透 |
