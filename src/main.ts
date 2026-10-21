@@ -1,8 +1,9 @@
 /**
  * @file main.ts
- * @description 前端啟動入口：支援 P2P 開房/加入、單機沙盒、2D 畫布與 HUD 即時反應
+ * @description 前端啟動入口：支援 P2P 開房/加入、單機沙盒、2D 畫布與動態音效與迷霧系統
  */
 
+import { soundManager } from './audio/audio-manager';
 import { DEFAULT_MAP } from './core/map-data';
 import { GamePhase, GameStateSnapshot, PlayerState, RoleType } from './core/types';
 import { InputController } from './input/input-controller';
@@ -14,6 +15,15 @@ import { CanvasRenderer } from './render/canvas-view';
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const renderer = new CanvasRenderer(canvas);
 const input = new InputController(canvas);
+
+// 首次使用者互動時預解鎖 AudioContext
+const initAudioOnce = () => {
+  soundManager.preloadAll();
+  window.removeEventListener('click', initAudioOnce);
+  window.removeEventListener('keydown', initAudioOnce);
+};
+window.addEventListener('click', initAudioOnce);
+window.addEventListener('keydown', initAudioOnce);
 
 // DOM 元素參照
 const lobbyModal = document.getElementById('lobby-modal')!;
@@ -48,6 +58,7 @@ let hostInstance: P2PHost | null = null;
 let clientInstance: P2PClient | null = null;
 let localPlayerId: string = '';
 let latestSnapshot: GameStateSnapshot | null = null;
+let lastPhase: GamePhase | null = null;
 
 // ==========================================
 // 1. 建立房間 (Host 流程)
@@ -201,7 +212,10 @@ btnSkill.addEventListener('click', () => {
 
 function triggerSkillAction() {
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
-    hostInstance?.engine.handleSkillCast(localPlayerId);
+    const res = hostInstance?.engine.handleSkillCast(localPlayerId);
+    if (res?.success) {
+      if (res.message.includes('庇護')) soundManager.playShieldShatter();
+    }
   } else if (currentMode === 'CLIENT') {
     clientInstance?.sendInput(0, 0, 0, 'SKILL');
   }
@@ -215,6 +229,7 @@ btnEmergency.addEventListener('click', () => {
 });
 
 function triggerEmergencyAction() {
+  soundManager.playBell();
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleTriggerEmergency(localPlayerId);
     console.log(`[警鐘] ${res?.message}`);
@@ -236,6 +251,9 @@ btnSkipVote.addEventListener('click', () => {
 // ==========================================
 function updateMeetingUI(snapshot: GameStateSnapshot) {
   if (snapshot.phase === GamePhase.MEETING_CALLED || snapshot.phase === GamePhase.VOTING) {
+    if (lastPhase !== snapshot.phase && snapshot.phase === GamePhase.MEETING_CALLED) {
+      soundManager.playBell();
+    }
     meetingModal.style.display = 'flex';
     votingTimer.innerText = `剩餘 ${Math.ceil(snapshot.phaseRemainingTime)}s`;
 
@@ -261,10 +279,41 @@ function updateMeetingUI(snapshot: GameStateSnapshot) {
     meetingModal.style.display = 'none';
     voteOptions.innerHTML = '';
   }
+  lastPhase = snapshot.phase;
 }
 
 // ==========================================
-// 6. 主渲染與主循環
+// 6. 心跳氛圍與音效監測
+// ==========================================
+function updateAudioAtmosphere(snapshot: GameStateSnapshot, localPlayer: PlayerState) {
+  if (!localPlayer.isAlive || snapshot.phase !== GamePhase.FREE_ROAM) {
+    soundManager.setHeartbeatActive(false);
+    return;
+  }
+
+  // 1. 若心智低於 50% 觸發心跳
+  let needHeartbeat = localPlayer.sanity < 50;
+
+  // 2. 若有幽影在身旁 180px 徘徊，觸發恐懼心跳
+  if (localPlayer.faction !== 'SHADOW') {
+    for (const id in snapshot.players) {
+      const other = snapshot.players[id];
+      if (other.isAlive && other.faction === 'SHADOW') {
+        const dx = other.x - localPlayer.x;
+        const dy = other.y - localPlayer.y;
+        if (dx * dx + dy * dy < 180 * 180) {
+          needHeartbeat = true;
+          break;
+        }
+      }
+    }
+  }
+
+  soundManager.setHeartbeatActive(needHeartbeat);
+}
+
+// ==========================================
+// 7. 主渲染與主循環
 // ==========================================
 let lastTime = performance.now();
 
@@ -280,6 +329,9 @@ function gameLoop(now: number) {
       const me = snap.players[localPlayerId];
       if (me && snap.phase === GamePhase.FREE_ROAM) {
         const { dx, dy, rotation } = input.getMovement(me.x, me.y);
+        if (dx !== 0 || dy !== 0) {
+          soundManager.playFootstep();
+        }
         hostInstance.engine.handlePlayerMove(localPlayerId, dx, dy, rotation, deltaSec);
       }
       activeSnapshot = hostInstance.engine.update(deltaSec);
@@ -290,6 +342,9 @@ function gameLoop(now: number) {
       const me = activeSnapshot.players[localPlayerId];
       if (me && activeSnapshot.phase === GamePhase.FREE_ROAM) {
         const { dx, dy, rotation } = input.getMovement(me.x, me.y);
+        if (dx !== 0 || dy !== 0) {
+          soundManager.playFootstep();
+        }
         clientInstance.sendInput(dx, dy, rotation);
       }
     }
@@ -298,7 +353,13 @@ function gameLoop(now: number) {
   // 畫面渲染與 HUD 更新
   if (activeSnapshot) {
     const me = activeSnapshot.players[localPlayerId];
-    hudRole.innerText = me ? `${me.name} [${me.role}]` : '旁觀中';
+    if (me) {
+      hudRole.innerText = `${me.name} [${me.role}]`;
+      updateAudioAtmosphere(activeSnapshot, me);
+    } else {
+      hudRole.innerText = '旁觀中';
+    }
+
     hudRitual.innerText = `${activeSnapshot.ritualProgress.toFixed(1)}%`;
     hudTimer.innerText = `${Math.ceil(activeSnapshot.phaseRemainingTime)}s`;
 

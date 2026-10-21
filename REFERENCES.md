@@ -23,11 +23,15 @@
 
 ---
 
-## 3. 音效與環境音樂 (Audio Assets)
+## 3. 音效與環境音樂 (Audio Assets - CC0 1.0 Universal)
 
-| 資產名稱 | 用途 | 授權協議 | 作者 / 出處 | 備註 |
+| 資產檔案 | 用途 | 授權協議 | 作者 / 出處 | 取樣規格 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Web Audio API Procedural Synthesizer** | 腳步聲 / 警報 / 技能音效 | MIT / CC0 (代碼合成) | 專案內建代碼生成 | 使用 Web Audio API 即時震盪器合成，拒絕肥大音檔 |
+| **`public/assets/audio/bell.wav`** | 古堡銅鐘長鳴（緊急會議敲鐘） | CC0 1.0 Universal | 專案專用高保真聲學物理合成器生成 | 16-bit 44.1kHz Mono PCM |
+| **`public/assets/audio/footstep.wav`** | 石板走動腳步回饋 | CC0 1.0 Universal | 專案專用高保真聲學物理合成器生成 | 16-bit 44.1kHz Mono PCM |
+| **`public/assets/audio/heartbeat.wav`** | 壓抑雙心跳（幽影靠近 / Sanity 緊縮） | CC0 1.0 Universal | 專案專用高保真聲學物理合成器生成 | 16-bit 44.1kHz Mono PCM |
+| **`public/assets/audio/shield.wav`** | 庇護聖光破裂（防禦抵擋成功） | CC0 1.0 Universal | 專案專用高保真聲學物理合成器生成 | 16-bit 44.1kHz Mono PCM |
+| **`public/assets/audio/kill.wav`** | 幽影暗殺背刺（突襲處決打擊） | CC0 1.0 Universal | 專案專用高保真聲學物理合成器生成 | 16-bit 44.1kHz Mono PCM |
 
 ---
 

@@ -1,15 +1,17 @@
 /**
  * @file canvas-view.ts
- * @description 2D Canvas 俯視小人與地圖環境渲染器（原生 Canvas 2D，雙緩衝，零多餘套件依賴）
+ * @description 2D Canvas 俯視小人與動態迷霧視野渲染器（原生 Canvas 2D 雙緩衝，零多餘套件依賴）
  */
 
 import { GameMap } from '../core/map-data';
 import { GamePhase, GameStateSnapshot, PlayerId, PlayerState } from '../core/types';
+import { FogOfWar } from './fog-of-war';
 
 export class CanvasRenderer {
   private ctx: CanvasRenderingContext2D;
   private width: number;
   private height: number;
+  public fogOfWar: FogOfWar;
 
   constructor(canvas: HTMLCanvasElement) {
     const context = canvas.getContext('2d');
@@ -17,10 +19,12 @@ export class CanvasRenderer {
     this.ctx = context;
     this.width = canvas.width;
     this.height = canvas.height;
+    this.fogOfWar = new FogOfWar(canvas.width, canvas.height);
   }
 
   public render(snapshot: GameStateSnapshot, map: GameMap, localPlayerId: PlayerId): void {
     const ctx = this.ctx;
+    const localPlayer = snapshot.players[localPlayerId];
 
     // 1. 清空畫布背景
     ctx.fillStyle = '#090a10';
@@ -35,12 +39,17 @@ export class CanvasRenderer {
     // 4. 繪製長廊障礙牆體
     this.renderWalls(ctx, map);
 
-    // 5. 繪製所有玩家俯視小人
-    this.renderPlayers(ctx, snapshot.players, localPlayerId);
+    // 5. 繪製視線內之玩家俯視小人 (結合牆線遮擋與視野半徑)
+    if (localPlayer) {
+      this.renderPlayers(ctx, snapshot.players, localPlayer, map);
+    }
 
-    // 6. 若處於會議階段，繪製暗化濾鏡
-    if (snapshot.phase === GamePhase.MEETING_CALLED || snapshot.phase === GamePhase.VOTING) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    // 6. 施加動態迷霧視野 (Fog of War)
+    if (localPlayer && snapshot.phase === GamePhase.FREE_ROAM) {
+      this.fogOfWar.applyFog(ctx, localPlayer, map);
+    } else if (snapshot.phase === GamePhase.MEETING_CALLED || snapshot.phase === GamePhase.VOTING) {
+      // 會議期間全員在圓桌聚首，全場視野清晰，僅施加會議暗化濾鏡
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.fillRect(0, 0, this.width, this.height);
     }
   }
@@ -112,11 +121,17 @@ export class CanvasRenderer {
   private renderPlayers(
     ctx: CanvasRenderingContext2D,
     players: Record<PlayerId, PlayerState>,
-    localPlayerId: PlayerId
+    localPlayer: PlayerState,
+    map: GameMap
   ): void {
     for (const id in players) {
       const player = players[id];
-      const isLocal = id === localPlayerId;
+      const isLocal = id === localPlayer.id;
+
+      // 檢驗是否在本地玩家的視線範圍內 (Fog of War 遮蔽)
+      if (!isLocal && !this.fogOfWar.isPlayerVisible(localPlayer, player, map)) {
+        continue;
+      }
 
       ctx.save();
       ctx.translate(player.x, player.y);
