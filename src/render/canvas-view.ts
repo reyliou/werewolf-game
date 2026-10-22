@@ -116,7 +116,8 @@ export class CanvasRenderer {
       meatCount: 0,
       assignedCottageId: 'cottage-1',
       insideCottageId: null,
-      unreadLetters: []
+      unreadLetters: [],
+      color: '#38bdf8'
     };
 
     ctx.save();
