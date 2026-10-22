@@ -10,11 +10,11 @@ import { InputController } from './input/input-controller';
 import { P2PClient } from './net/p2p-client';
 import { P2PHost } from './net/p2p-host';
 import { generateRoomCode } from './net/peer-manager';
-import { ThreeVillageRenderer } from './render/three-village-view';
+import { CanvasRenderer } from './render/canvas-view';
 
 const container = document.getElementById('game-container')!;
-const renderer = new ThreeVillageRenderer(container);
-const input = new InputController(renderer.renderer.domElement);
+const renderer = new CanvasRenderer(container);
+const input = new InputController(renderer.domElement);
 
 // 音訊點擊首解鎖
 const initAudioOnce = () => {
@@ -245,20 +245,20 @@ btnSoloSandbox.addEventListener('click', () => {
 });
 
 // ==========================================
-// 4. 輸入與互動綁定 (割麥 / 吃肉 / 變身 / 第一人稱視角切換)
+// 4. 輸入與互動綁定 (割麥 / 吃肉 / 變身 / Among Us 鏡頭縮放切換)
 // ==========================================
-input.registerCameraToggleHandler((isFPV) => {
-  renderer.isFirstPerson = isFPV;
-  btnCameraView.innerText = isFPV ? '👁️ 視角: 第一人稱 [V]' : '👁️ 視角: 俯視 [V]';
+input.registerCameraToggleHandler((isCloseup) => {
+  renderer.isCloseupCamera = isCloseup;
+  btnCameraView.innerText = isCloseup ? '🔍 視角: 近景跟隨 [V]' : '🗺️ 視角: 全村俯瞰 [V]';
   showToast(
-    isFPV
-      ? '👁️ 已切換為【第一人稱沉浸視角】！點擊畫面或拖曳滑鼠可 360° 轉頭，按 Q/方向鍵亦可轉向，按 [V] 切回俯視。'
-      : '🗺️ 已切換回【第三人稱微縮俯視視角】！按 [V] 可隨時切換第一人稱。',
-    3500
+    isCloseup
+      ? '🔍 已切換為【Among Us 近景跟隨視角】！進入木屋自動透視室內，按 [V] 可切換全村俯瞰。'
+      : '🗺️ 已切換為【全村戰術俯瞰視角】！按 [V] 可隨時切回近景跟隨。',
+    3000
   );
 });
 btnCameraView.addEventListener('click', () => {
-  input.toggleFirstPerson();
+  input.toggleCameraView();
 });
 
 input.registerInteractHandler(() => {
@@ -269,7 +269,7 @@ btnInteract.addEventListener('click', () => {
 });
 
 function triggerInteractAction() {
-  renderer.motionSystem.triggerAction(localPlayerId);
+  renderer.triggerAction(localPlayerId);
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleInteract(localPlayerId);
     if (res) {
@@ -294,7 +294,7 @@ btnSkill.addEventListener('click', () => {
 });
 
 function triggerSkillAction() {
-  renderer.motionSystem.triggerAction(localPlayerId);
+  renderer.triggerAction(localPlayerId);
   if (currentMode === 'HOST' || currentMode === 'SOLO') {
     const res = hostInstance?.engine.handleSkillCast(localPlayerId);
     if (res) {
@@ -593,9 +593,7 @@ function gameLoop(now: number) {
     }
 
     updateMeetingUI(activeSnapshot);
-    renderer.isFirstPerson = input.isFirstPerson;
-    renderer.fpvYaw = input.fpvYaw;
-    renderer.fpvPitch = input.fpvPitch;
+    renderer.isCloseupCamera = input.isCloseupView;
     renderer.render(activeSnapshot, VILLAGE_MAP, localPlayerId, deltaSec);
   }
 
