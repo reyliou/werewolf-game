@@ -51,8 +51,8 @@ export class CanvasRenderer {
       this.domElement = containerOrCanvas;
     } else {
       this.domElement = document.createElement('canvas');
-      containerOrCanvas.innerHTML = '';
-      containerOrCanvas.appendChild(this.domElement);
+      containerOrCanvas.querySelectorAll('canvas').forEach((c) => c.remove());
+      containerOrCanvas.prepend(this.domElement);
     }
 
     const context = this.domElement.getContext('2d');
@@ -82,6 +82,50 @@ export class CanvasRenderer {
     if (track) {
       track.actionTimer = 0.42;
     }
+  }
+
+  /**
+   * 大廳待機背景預覽渲染
+   */
+  public renderPreview(map: VillageMap, deltaSec: number = 0.016): void {
+    this.elapsedTime += deltaSec;
+    const ctx = this.ctx;
+    const canvasW = this.domElement.width;
+    const canvasH = this.domElement.height;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#090d14';
+    ctx.fillRect(0, 0, canvasW, canvasH);
+
+    const fitScale = Math.min(canvasW / map.width, canvasH / map.height);
+    const dummyObserver: PlayerState = {
+      id: 'preview',
+      name: 'Observer',
+      role: RoleType.VILLAGER,
+      faction: 'VILLAGE',
+      isAlive: false,
+      x: map.bonfire.x,
+      y: map.bonfire.y,
+      rotation: 0,
+      speed: 0,
+      sanity: 100,
+      skillCooldownRemaining: 0,
+      hasShield: false,
+      isTransformed: false,
+      wheatCount: 0,
+      meatCount: 0,
+      assignedCottageId: 'cottage-1',
+      insideCottageId: null,
+      unreadLetters: []
+    };
+
+    ctx.save();
+    ctx.translate(canvasW / 2, canvasH / 2);
+    ctx.scale(fitScale, fitScale);
+    ctx.translate(-map.width / 2, -map.height / 2);
+    this.villageRenderer.renderEnvironment(ctx, map, dummyObserver, GamePhase.AFTERNOON, deltaSec);
+    this.villageRenderer.renderForegroundAndAtmosphere(ctx, map, dummyObserver, GamePhase.AFTERNOON);
+    ctx.restore();
   }
 
   public render(

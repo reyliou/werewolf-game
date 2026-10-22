@@ -595,6 +595,8 @@ function gameLoop(now: number) {
     updateMeetingUI(activeSnapshot);
     renderer.isCloseupCamera = input.isCloseupView;
     renderer.render(activeSnapshot, VILLAGE_MAP, localPlayerId, deltaSec);
+  } else {
+    renderer.renderPreview(VILLAGE_MAP, deltaSec);
   }
 
   requestAnimationFrame(gameLoop);
